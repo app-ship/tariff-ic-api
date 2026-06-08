@@ -46,8 +46,7 @@ steps:
       - '--timeout=120'
       - '--concurrency=80'
       - '--env-vars-file=env.staging'
-      # Secrets: MONGODB_URI and AUTH0_ISSUER_BASE_URL override the env file values
-      - '--set-secrets=MONGODB_URI=TARIFF_IC_MONGODB_URI_STAGING:latest'
+      - '--set-secrets=MONGODB_URI=TARIFF_IC_MONGODB_URI:latest'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/infis-repo/tariff-ic-api-staging:$BUILD_ID'
