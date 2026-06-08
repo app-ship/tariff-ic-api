@@ -29,21 +29,7 @@ steps:
       - 'push'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/infis-repo/tariff-ic-api:$BUILD_ID'
 
-  # Step 4: Create the MONGODB_URI secret if it does not exist yet
-  # (the app degrades gracefully without it, so deploys never block on a missing secret)
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:slim'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        gcloud secrets describe TARIFF_IC_MONGODB_URI --project=$PROJECT_ID > /dev/null 2>&1 || \
-          echo "placeholder-set-real-uri" | \
-          gcloud secrets create TARIFF_IC_MONGODB_URI \
-            --data-file=- \
-            --replication-policy=automatic \
-            --project=$PROJECT_ID
-
-  # Step 5: Deploy to Cloud Run (production)
+  # Step 4: Deploy to Cloud Run (production)
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
       - 'run'
