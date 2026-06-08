@@ -21,6 +21,7 @@ import morgan from 'morgan';
 import { connectDB }         from './db.js';
 import { authMiddleware }    from './middleware/auth.js';
 import { errorHandler }      from './middleware/errorHandler.js';
+import publicAuthRoutes      from './routes/publicAuth.js';
 import authRoutes            from './routes/auth.js';
 import { classifyRouter }    from './routes/classify.js';
 import { analyzeRouter }     from './routes/analyze.js';
@@ -61,10 +62,13 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// ── Auth middleware (all routes below require a valid token or dev bypass) ────
+// ── Public auth (login / register) — no bearer token required ────────────────
+app.use('/auth', publicAuthRoutes);
+
+// ── Auth middleware (all routes below require a valid token) ──────────────────
 app.use(authMiddleware);
 
-// ── Auth routes (bootstrap, me, tour-progress) ───────────────────────────────
+// ── Auth routes (bootstrap, me, tour-progress) — protected ───────────────────
 app.use('/auth', authRoutes);
 
 // ── Proxy routes ─────────────────────────────────────────────────────────────
