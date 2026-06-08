@@ -1,20 +1,23 @@
 /**
  * Auth middleware
  *
- * Strategy (in order):
- *  1. X-Api-Key header — static API key (simple / service-to-service)
- *  2. Authorization: Bearer <jwt> — signed user token (JWT_SECRET in env)
- *  3. Dev bypass — if API_KEY is not set, allow through with default tenant
+ * Production: validates Auth0 RS256 access tokens via JWKS.
+ *   Requires AUTH0_ISSUER_BASE_URL and AUTH0_AUDIENCE env vars.
+ *   After JWT verification, resolves auth0Sub -> Mongo User and stamps req.tenant.
  *
- * On success, attaches `req.tenant = { orgId, userId }` for downstream use.
+ * Dev bypass: if NODE_ENV !== 'production' and AUTH0_ISSUER_BASE_URL is unset,
+ *   requests pass through with DEFAULT_ORG_ID / DEFAULT_USER_ID as tenant.
  */
 
 import type { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { isDBConnected } from '../db.js';
+import { User } from '../models/User.js';
 
 export interface Tenant {
   orgId: string;
-  userId: string;
+  userId: string;    // Mongo User _id as string
+  auth0Sub: string;
 }
 
 declare global {
@@ -25,51 +28,81 @@ declare global {
   }
 }
 
-const API_KEY      = process.env.API_KEY;
-const JWT_SECRET   = process.env.JWT_SECRET;
-const DEFAULT_ORG  = process.env.DEFAULT_ORG_ID  || 'tariffic-dev-org';
-const DEFAULT_USER = process.env.DEFAULT_USER_ID  || 'tariffic-dev-user';
+const ISSUER_BASE    = process.env.AUTH0_ISSUER_BASE_URL ?? '';
+const AUDIENCE       = process.env.AUTH0_AUDIENCE ?? '';
+const DEFAULT_ORG    = process.env.DEFAULT_ORG_ID  || 'tariffic-dev-org';
+const DEFAULT_USER   = process.env.DEFAULT_USER_ID || 'tariffic-dev-user';
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
-  // ── 1. API key ────────────────────────────────────────────────────────
-  const providedKey = req.headers['x-api-key'] as string | undefined;
-  if (API_KEY && providedKey) {
-    if (providedKey !== API_KEY) {
-      res.status(401).json({ error: 'Invalid API key' });
+// Lazily initialised JWKS set (cached connection)
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+function getJwks() {
+  if (!jwks && ISSUER_BASE) {
+    const issuer = ISSUER_BASE.replace(/\/$/, '');
+    jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
+  }
+  return jwks;
+}
+
+export async function authMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const keyset = getJwks();
+
+  // ── Dev bypass ────────────────────────────────────────────────────────────
+  if (!keyset) {
+    if (process.env.NODE_ENV === 'production') {
+      res.status(500).json({ error: 'Auth not configured — set AUTH0_ISSUER_BASE_URL' });
       return;
     }
-    // Key valid — extract tenant hints from optional headers
-    req.tenant = {
-      orgId:  (req.headers['x-org-id']  as string) || DEFAULT_ORG,
-      userId: (req.headers['x-user-id'] as string) || DEFAULT_USER,
-    };
+    req.tenant = { orgId: DEFAULT_ORG, userId: DEFAULT_USER, auth0Sub: 'dev|bypass' };
     return next();
   }
 
-  // ── 2. JWT Bearer ─────────────────────────────────────────────────────
-  const bearer = req.headers.authorization;
-  if (JWT_SECRET && bearer?.startsWith('Bearer ')) {
-    const token = bearer.slice(7);
+  // ── Extract bearer token ──────────────────────────────────────────────────
+  const header = req.headers.authorization ?? '';
+  if (!header.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing bearer token' });
+    return;
+  }
+  const token = header.slice(7);
+
+  // ── Verify Auth0 JWT ─────────────────────────────────────────────────────
+  let payload: Record<string, unknown>;
+  try {
+    const { payload: p } = await jwtVerify(token, keyset, {
+      issuer:   ISSUER_BASE.replace(/\/$/, '') + '/',
+      audience: AUDIENCE,
+    });
+    payload = p as Record<string, unknown>;
+  } catch (err) {
+    res.status(401).json({ error: 'Invalid or expired token', detail: (err as Error).message });
+    return;
+  }
+
+  const auth0Sub = payload.sub as string;
+
+  // ── Resolve to local user (if DB is connected) ────────────────────────────
+  if (isDBConnected()) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as Record<string, unknown>;
-      req.tenant = {
-        orgId:  (payload.org_id  as string) || DEFAULT_ORG,
-        userId: (payload.user_id as string || payload.sub as string) || DEFAULT_USER,
-      };
-      return next();
+      const user = await User.findOne({ auth0Sub }).lean();
+      if (user) {
+        req.tenant = {
+          orgId:    String(user.orgId),
+          userId:   String(user._id),
+          auth0Sub,
+        };
+        return next();
+      }
     } catch {
-      res.status(401).json({ error: 'Invalid or expired token' });
-      return;
+      // DB error — fall through to sub-based tenant (bootstrap will fix it)
     }
   }
 
-  // ── 3. Dev bypass ─────────────────────────────────────────────────────
-  // If neither API_KEY nor JWT_SECRET is configured, allow through with
-  // default tenant (local dev only — never deploy without at least API_KEY).
-  if (!API_KEY && !JWT_SECRET) {
-    req.tenant = { orgId: DEFAULT_ORG, userId: DEFAULT_USER };
-    return next();
-  }
-
-  res.status(401).json({ error: 'Authentication required' });
+  // User not yet provisioned (bootstrap not called yet) — allow through so
+  // /auth/bootstrap can create the record. Tenant uses auth0Sub as placeholder.
+  req.tenant = { orgId: '', userId: '', auth0Sub };
+  return next();
 }

@@ -46,7 +46,8 @@ steps:
       - '--timeout=120'
       - '--concurrency=80'
       - '--env-vars-file=env.production'
-      - '--set-secrets=API_KEY=TARIFF_IC_API_KEY:latest'
+      # Auth0 JWKS issuer is baked into env.production; override if needed with a secret
+      - '--set-secrets=MONGODB_URI=TARIFF_IC_MONGODB_URI:latest'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/infis-repo/tariff-ic-api:$BUILD_ID'
