@@ -86,7 +86,7 @@ export interface IActionPlan extends Document {
   dueDate?:     Date;
   projectedSavings?: number;
   realizedSavings?:  number;
-  blocks:       Block[];
+  blocks:       any[];
   generatedModel?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -109,7 +109,7 @@ const actionPlanSchema = new Schema<IActionPlan>(
     dueDate:      { type: Date },
     projectedSavings: { type: Number },
     realizedSavings:  { type: Number },
-    blocks:       { type: [Schema.Types.Mixed], default: [] },
+    blocks:       { type: Schema.Types.Mixed, default: [] },
     generatedModel: { type: String },
   },
   { timestamps: true },

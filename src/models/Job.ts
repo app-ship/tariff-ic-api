@@ -16,7 +16,7 @@ export interface IJob extends Document {
     message:   string;
   };
   /** Per-country intermediate results (analyze jobs only). */
-  partials: Array<{ country: string; data?: unknown; error?: string }>;
+  partials: any[];
   /** Final result blob — classify: raw DR JSON; analyze: array of per-country rows. */
   result:   unknown;
   error:    string;
@@ -40,7 +40,7 @@ const jobSchema = new Schema<IJob>(
       total:     { type: Number, default: 0 },
       message:   { type: String, default: '' },
     },
-    partials: { type: [Schema.Types.Mixed], default: [] },
+    partials: { type: Schema.Types.Mixed, default: [] },
     result:   { type: Schema.Types.Mixed, default: null },
     error:    { type: String,  default: '' },
     lease: {
