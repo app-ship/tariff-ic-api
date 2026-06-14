@@ -6,11 +6,15 @@
  *   POST /auth/bootstrap      → provision new user + org
  *   GET  /auth/me             → current user/org info
  *   PUT  /auth/tour-progress  → persist onboarding progress
- *   POST /classify            → deep-research HTS classification
- *   POST /analyze             → deep-research tariff calculation
- *   POST /resolve             → deep-research material resolve
+ *   POST /classify            → create classify job → 202 { jobId }
+ *   POST /analyze             → create analyze job  → 202 { jobId }
+ *   GET  /jobs/:id/stream     → SSE stream for job progress + result
+ *   GET  /jobs/:id            → JSON snapshot of job state/result
+ *   POST /resolve             → PubChem material resolver (fast, no job)
  *   GET  /history             → tariff search history (+sample)
  *   GET  /validate-cas/:cas   → validate CAS number
+ *   GET  /searches            → material search history (paginated)
+ *   GET  /searches/:id        → single material search detail
  */
 
 import 'dotenv/config';
@@ -26,8 +30,17 @@ import authRoutes            from './routes/auth.js';
 import { classifyRouter }    from './routes/classify.js';
 import { analyzeRouter }     from './routes/analyze.js';
 import { resolveRouter }     from './routes/resolve.js';
+import { intelRouter }       from './routes/intel.js';
 import { historyRouter }     from './routes/history.js';
 import { validateCasRouter } from './routes/validateCas.js';
+import { jobsRouter }        from './routes/jobs.js';
+import { searchesRouter }    from './routes/searches.js';
+import { assessRouter }      from './routes/assess.js';
+import { recommendRouter }   from './routes/recommend.js';
+import { actRouter }         from './routes/act.js';
+import { monitorRouter }     from './routes/monitor.js';
+import { monitorCronRouter } from './routes/monitorCron.js';
+import { notificationsRouter } from './routes/notifications.js';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT || '3002', 10);
@@ -65,6 +78,9 @@ app.get('/health', (_req, res) => {
 // ── Public auth (login / register) — no bearer token required ────────────────
 app.use('/auth', publicAuthRoutes);
 
+// ── Monitor cron (Cloud Scheduler) — no bearer token; guarded by X-CRON-SECRET ─
+app.use('/monitor/cron', monitorCronRouter);
+
 // ── Auth middleware (all routes below require a valid token) ──────────────────
 app.use(authMiddleware);
 
@@ -75,8 +91,16 @@ app.use('/auth', authRoutes);
 app.use('/classify',     classifyRouter);
 app.use('/analyze',      analyzeRouter);
 app.use('/resolve',      resolveRouter);
+app.use('/intel',        intelRouter);
 app.use('/history',      historyRouter);
 app.use('/validate-cas', validateCasRouter);
+app.use('/jobs',         jobsRouter);
+app.use('/searches',     searchesRouter);
+app.use('/assess',       assessRouter);
+app.use('/recommend',    recommendRouter);
+app.use('/act',          actRouter);
+app.use('/monitor',      monitorRouter);
+app.use('/notifications', notificationsRouter);
 
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use(errorHandler);

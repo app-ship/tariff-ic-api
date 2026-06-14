@@ -6,11 +6,16 @@
  * Grant (ROPG). Signup uses Auth0's public dbconnections/signup endpoint.
  */
 
-const DOMAIN        = process.env.AUTH0_DOMAIN        || (process.env.AUTH0_ISSUER_BASE_URL || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-const CLIENT_ID     = process.env.AUTH0_CLIENT_ID     || '';
-const CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET || '';
-const AUDIENCE      = process.env.AUTH0_AUDIENCE      || '';
-const DB_CONNECTION = process.env.AUTH0_DB_CONNECTION || 'Username-Password-Authentication';
+function auth0Config() {
+  const issuer = process.env.AUTH0_ISSUER_BASE_URL || '';
+  return {
+    domain:       process.env.AUTH0_DOMAIN || issuer.replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    clientId:     process.env.AUTH0_CLIENT_ID     || '',
+    clientSecret: process.env.AUTH0_CLIENT_SECRET || '',
+    audience:     process.env.AUTH0_AUDIENCE      || '',
+    dbConnection: process.env.AUTH0_DB_CONNECTION || 'Username-Password-Authentication',
+  };
+}
 
 export interface Auth0Tokens {
   access_token: string;
@@ -27,7 +32,8 @@ export interface Auth0Profile {
 }
 
 export function isAuth0Configured(): boolean {
-  return Boolean(DOMAIN && CLIENT_ID && CLIENT_SECRET);
+  const { domain, clientId, clientSecret } = auth0Config();
+  return Boolean(domain && clientId && clientSecret);
 }
 
 /** Map an Auth0 error body to a friendly, consumer-facing message. */
@@ -64,18 +70,19 @@ export class Auth0Error extends Error {
 
 /** Resource Owner Password Grant — exchange email/password for tokens. */
 export async function loginWithPassword(email: string, password: string): Promise<Auth0Tokens> {
-  const res = await fetch(`https://${DOMAIN}/oauth/token`, {
+  const { domain, clientId, clientSecret, audience, dbConnection } = auth0Config();
+  const res = await fetch(`https://${domain}/oauth/token`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       grant_type:    'password',
-      client_id:     CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      audience:      AUDIENCE,
+      client_id:     clientId,
+      client_secret: clientSecret,
+      audience,
       username:      email,
       password,
       scope:         'openid profile email',
-      connection:    DB_CONNECTION,
+      connection:    dbConnection,
     }),
   });
 
@@ -88,12 +95,13 @@ export async function loginWithPassword(email: string, password: string): Promis
 
 /** Create a new database user via Auth0's public signup endpoint. */
 export async function signupUser(email: string, password: string, name: string): Promise<void> {
-  const res = await fetch(`https://${DOMAIN}/dbconnections/signup`, {
+  const { domain, clientId, dbConnection } = auth0Config();
+  const res = await fetch(`https://${domain}/dbconnections/signup`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      client_id:  CLIENT_ID,
-      connection: DB_CONNECTION,
+      client_id:  clientId,
+      connection: dbConnection,
       email,
       password,
       name,

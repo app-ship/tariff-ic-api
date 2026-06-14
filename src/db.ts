@@ -61,17 +61,29 @@ export async function connectDB(): Promise<void> {
  */
 async function ensureIndexes(): Promise<void> {
   // Dynamic import keeps models out of the top-level require cycle
-  const { User }         = await import('./models/User.js');
-  const { Organization } = await import('./models/Organization.js');
-  const { SampleEntry }  = await import('./fixtures/sampleAnalysis.js');
+  const { User }           = await import('./models/User.js');
+  const { Organization }   = await import('./models/Organization.js');
+  const { SampleEntry }    = await import('./fixtures/sampleAnalysis.js');
+  const { Job }            = await import('./models/Job.js');
+  const { MaterialSearch } = await import('./models/MaterialSearch.js');
+  const { TariffMonitor }  = await import('./models/TariffMonitor.js');
+  const { Notification }   = await import('./models/Notification.js');
+  const { PortfolioInsight } = await import('./models/PortfolioInsight.js');
+  const { ActionPlan }     = await import('./models/ActionPlan.js');
 
   await Promise.all([
     User.createIndexes(),
     Organization.createIndexes(),
     SampleEntry.createIndexes(),
+    Job.createIndexes(),
+    MaterialSearch.createIndexes(),
+    TariffMonitor.createIndexes(),
+    Notification.createIndexes(),
+    PortfolioInsight.createIndexes(),
+    ActionPlan.createIndexes(),
   ]);
 
-  console.log('[db] Indexes synced (users, organizations, sample_entries)');
+  console.log('[db] Indexes synced (users, organizations, sample_entries, jobs, material_searches, tariff_monitors, notifications, portfolio_insights, action_plans)');
 }
 
 export function isDBConnected(): boolean {
