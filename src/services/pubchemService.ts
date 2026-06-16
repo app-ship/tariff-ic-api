@@ -9,16 +9,53 @@
  *   2. /compound/cid/{cid}/synonyms + /description (parallel)  → preferred name + CAS list
  */
 
-import axios from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 
-const BASE = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
+const BASE   = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
 const CAS_RE = /^\d{2,7}-\d{2}-\d$/;
 
-const pubchem = axios.create({
+// PubChem's shared GCP egress can trigger 503 on burst traffic.
+// We follow NCBI's guidelines: identify the tool + contact email in User-Agent,
+// and retry with jittered exponential backoff on 429/503 (same policy used by
+// the deep-research service — see utils/external_http.py).
+const PUBCHEM_UA =
+  process.env.INFIS_USER_AGENT ??
+  'InfisTariffIC/1.0 (+https://infis.ai/bot; ops@infis.ai)';
+
+const pubchem: AxiosInstance = axios.create({
   baseURL: BASE,
   timeout: 15_000,
-  headers: { Accept: 'application/json' },
+  headers: {
+    'Accept':     'application/json',
+    'User-Agent': PUBCHEM_UA,
+  },
 });
+
+/** Retry a PubChem GET up to `maxAttempts` times on transient errors (429/503). */
+async function pubchemGet<T>(url: string, maxAttempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { data } = await pubchem.get<T>(url);
+      return data;
+    } catch (err: unknown) {
+      lastErr = err;
+      const status = (err as any)?.response?.status as number | undefined;
+      // 429 = rate limited, 503 = PubChem overloaded — both are retryable
+      if (status === 429 || status === 503) {
+        if (attempt < maxAttempts) {
+          // Jittered exponential back-off: ~500ms, ~1s, ~2s
+          const baseMs = 500 * Math.pow(2, attempt - 1);
+          const jitter  = Math.random() * baseMs * 0.5;
+          await new Promise((r) => setTimeout(r, baseMs + jitter));
+          continue;
+        }
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -72,7 +109,7 @@ interface PubChemProps {
 
 async function fetchProps(query: string): Promise<PubChemProps | null> {
   try {
-    const { data } = await pubchem.get<unknown>(
+    const data = await pubchemGet<unknown>(
       `/compound/name/${encodeURIComponent(query)}/property/MolecularFormula,MolecularWeight,CanonicalSMILES,InChI,InChIKey,IUPACName/JSON`,
     );
     const rows = (data as any)?.PropertyTable?.Properties as PubChemProps[] | undefined;
@@ -85,7 +122,7 @@ async function fetchProps(query: string): Promise<PubChemProps | null> {
 
 async function fetchSynonyms(cid: number): Promise<string[]> {
   try {
-    const { data } = await pubchem.get<unknown>(`/compound/cid/${cid}/synonyms/JSON`);
+    const data = await pubchemGet<unknown>(`/compound/cid/${cid}/synonyms/JSON`);
     return ((data as any)?.InformationList?.Information?.[0]?.Synonym as string[]) ?? [];
   } catch {
     return [];
@@ -94,7 +131,7 @@ async function fetchSynonyms(cid: number): Promise<string[]> {
 
 async function fetchTitle(cid: number): Promise<string | undefined> {
   try {
-    const { data } = await pubchem.get<unknown>(`/compound/cid/${cid}/description/JSON`);
+    const data = await pubchemGet<unknown>(`/compound/cid/${cid}/description/JSON`);
     const records: any[] = (data as any)?.InformationList?.Information ?? [];
     for (const r of records) {
       if (r.Title) return r.Title as string;
