@@ -6,8 +6,10 @@
  * and return an access token. The UI then stores the token and calls the
  * protected /auth/bootstrap to provision the sandbox org.
  *
- *   POST /auth/login     { email, password }            → { token, profile }
- *   POST /auth/register  { email, password, name }       → { token, profile }
+ *   POST /auth/login              { email, password }  → { token, profile }
+ *   POST /auth/register           { email, password, name } → { token, profile }
+ *   GET  /auth/social/:provider   → redirect to Auth0 authorize URL
+ *   GET  /auth/social/callback    → exchange Auth0 code → token, redirect to frontend
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -15,6 +17,7 @@ import {
   loginWithPassword,
   signupUser,
   decodeIdToken,
+  exchangeCodeForToken,
   isAuth0Configured,
   Auth0Error,
 } from '../services/auth0Service.js';
@@ -90,5 +93,72 @@ router.post('/register', async (req: Request, res: Response) => {
     return res.status(e.status || 400).json({ error: e.message || 'Sign up failed.' });
   }
 });
+
+// ── GET /auth/social/:provider — redirect to Auth0 authorize URL ──────────────
+// provider: 'google' | 'microsoft'
+const PROVIDER_CONNECTION: Record<string, string> = {
+  google:    'google-oauth2',
+  microsoft: 'windowslive',
+};
+
+router.get('/social/:provider', (req: Request, res: Response) => {
+  if (!ensureConfigured(res)) return;
+
+  const { domain, clientId } = auth0Config();
+  const provider = String(req.params['provider'] || '');
+  const connection = PROVIDER_CONNECTION[provider];
+  if (!connection) {
+    return res.status(400).json({ error: 'Unknown provider.' });
+  }
+
+  const callbackUrl = `${process.env.API_BASE_URL || `https://${req.headers.host}`}/auth/social/callback`;
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id:     clientId,
+    redirect_uri:  callbackUrl,
+    connection,
+    scope:         'openid profile email',
+    state:         req.query.state as string || '',
+  });
+
+  return res.redirect(`https://${domain}/authorize?${params.toString()}`);
+});
+
+// ── GET /auth/social/callback — exchange code, redirect to frontend ───────────
+router.get('/social/callback', async (req: Request, res: Response) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://tariffic.infis.ai';
+  const errorRedirect = `${frontendUrl}/login?error=social_auth_failed`;
+
+  const code  = req.query.code  as string | undefined;
+  const error = req.query.error as string | undefined;
+
+  if (error || !code) {
+    return res.redirect(errorRedirect);
+  }
+
+  try {
+    const callbackUrl = `${process.env.API_BASE_URL || `https://${req.headers.host}`}/auth/social/callback`;
+    const tokens  = await exchangeCodeForToken(code, callbackUrl);
+    const profile = decodeIdToken(tokens.id_token);
+
+    // Pass token to the frontend via query param (short-lived; frontend stores it immediately)
+    const params = new URLSearchParams({ token: tokens.access_token });
+    if (profile.email)   params.set('email',   profile.email);
+    if (profile.name)    params.set('name',     profile.name);
+    if (profile.picture) params.set('picture',  profile.picture);
+
+    return res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+  } catch {
+    return res.redirect(errorRedirect);
+  }
+});
+
+function auth0Config() {
+  const issuer = process.env.AUTH0_ISSUER_BASE_URL || '';
+  return {
+    domain:   process.env.AUTH0_DOMAIN || issuer.replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    clientId: process.env.AUTH0_CLIENT_ID || '',
+  };
+}
 
 export default router;

@@ -114,6 +114,29 @@ export async function signupUser(email: string, password: string, name: string):
   }
 }
 
+/** Authorization Code Grant — exchange OAuth code for tokens (used after social login redirect). */
+export async function exchangeCodeForToken(code: string, redirectUri: string): Promise<Auth0Tokens> {
+  const { domain, clientId, clientSecret, audience } = auth0Config();
+  const res = await fetch(`https://${domain}/oauth/token`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      grant_type:   'authorization_code',
+      client_id:    clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+      audience,
+    }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Auth0Error(friendlyAuthError(res.status, data), res.status);
+  }
+  return data as Auth0Tokens;
+}
+
 /** Decode an Auth0 ID token payload without verifying (we trust the token endpoint response). */
 export function decodeIdToken(idToken?: string): Auth0Profile {
   if (!idToken) return {};
