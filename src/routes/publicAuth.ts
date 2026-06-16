@@ -94,32 +94,31 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
-// ── GET /auth/social/callback — exchange code, redirect to frontend ───────────
-// MUST be declared before /social/:provider so Express doesn't match 'callback' as a provider.
-router.get('/social/callback', async (req: Request, res: Response) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://tariffic.infis.ai';
-  const errorRedirect = `${frontendUrl}/login?error=social_auth_failed`;
+// ── POST /auth/social/exchange — exchange Auth0 code for token ────────────────
+// Called by the frontend callback page (/auth/callback) after Auth0 redirects
+// back to the frontend with ?code=.... The frontend passes the code + the
+// redirect_uri it used so Auth0 can verify them match.
+router.post('/social/exchange', async (req: Request, res: Response) => {
+  const { code, redirectUri } = req.body as { code?: string; redirectUri?: string };
 
-  const code  = req.query.code  as string | undefined;
-  const error = req.query.error as string | undefined;
-
-  if (error || !code) {
-    return res.redirect(errorRedirect);
+  if (!code || !redirectUri) {
+    return res.status(400).json({ error: 'code and redirectUri are required.' });
   }
 
   try {
-    const callbackUrl = `${process.env.API_BASE_URL || `https://${req.headers.host}`}/auth/social/callback`;
-    const tokens  = await exchangeCodeForToken(code, callbackUrl);
+    const tokens  = await exchangeCodeForToken(code, redirectUri);
     const profile = decodeIdToken(tokens.id_token);
-
-    const params = new URLSearchParams({ token: tokens.access_token });
-    if (profile.email)   params.set('email',   profile.email);
-    if (profile.name)    params.set('name',     profile.name);
-    if (profile.picture) params.set('picture',  profile.picture);
-
-    return res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+    return res.json({
+      token: tokens.access_token,
+      profile: {
+        sub:     profile.sub,
+        email:   profile.email,
+        name:    profile.name,
+        picture: profile.picture,
+      },
+    });
   } catch {
-    return res.redirect(errorRedirect);
+    return res.status(401).json({ error: 'Social sign-in failed. Please try again.' });
   }
 });
 
@@ -140,7 +139,9 @@ router.get('/social/:provider', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Unknown provider.' });
   }
 
-  const callbackUrl = `${process.env.API_BASE_URL || `https://${req.headers.host}`}/auth/social/callback`;
+  // redirect_uri goes to the frontend — the browser never leaves the real domain
+  const frontendUrl = process.env.FRONTEND_URL || 'https://tariffic.infis.ai';
+  const callbackUrl = `${frontendUrl}/auth/callback`;
   const params = new URLSearchParams({
     response_type: 'code',
     client_id:     clientId,
