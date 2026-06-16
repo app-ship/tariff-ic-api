@@ -132,7 +132,7 @@ const PROVIDER_CONNECTION: Record<string, string> = {
 router.get('/social/:provider', (req: Request, res: Response) => {
   if (!ensureConfigured(res)) return;
 
-  const { domain, clientId } = auth0Config();
+  const { domain, clientId, audience } = auth0Config();
   const provider = String(req.params['provider'] || '');
   const connection = PROVIDER_CONNECTION[provider];
   if (!connection) {
@@ -147,6 +147,7 @@ router.get('/social/:provider', (req: Request, res: Response) => {
     client_id:     clientId,
     redirect_uri:  callbackUrl,
     connection,
+    audience,                               // required — tells Auth0 to issue a signed JWT, not an opaque token
     scope:         'openid profile email',
     state:         req.query.state as string || '',
   });
@@ -157,8 +158,9 @@ router.get('/social/:provider', (req: Request, res: Response) => {
 function auth0Config() {
   const issuer = process.env.AUTH0_ISSUER_BASE_URL || '';
   return {
-    domain:   process.env.AUTH0_DOMAIN || issuer.replace(/^https?:\/\//, '').replace(/\/$/, ''),
+    domain:   process.env.AUTH0_DOMAIN    || issuer.replace(/^https?:\/\//, '').replace(/\/$/, ''),
     clientId: process.env.AUTH0_CLIENT_ID || '',
+    audience: process.env.AUTH0_AUDIENCE  || 'https://api.tariffic.ai',
   };
 }
 
