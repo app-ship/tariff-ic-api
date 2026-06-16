@@ -41,8 +41,21 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
     picture?: string;
   };
 
-  // ── Idempotent: return existing user ────────────────────────────────────
-  const existing = await User.findOne({ auth0Sub }).populate<{ orgId: { name: string; slug: string; plan: string } }>('orgId');
+  // ── Idempotent: look up by auth0Sub first, then by email (account linking) ──
+  let existing = await User.findOne({ auth0Sub }).populate<{ orgId: { name: string; slug: string; plan: string } }>('orgId');
+
+  // Social login: the Google/Microsoft sub differs from the password-login sub.
+  // If not found by sub but email matches an existing account, link them.
+  if (!existing && email) {
+    const byEmail = await User.findOne({ email }).populate<{ orgId: { name: string; slug: string; plan: string } }>('orgId');
+    if (byEmail) {
+      // Attach the new social sub to the existing account
+      await User.updateOne({ _id: byEmail._id }, { $set: { auth0Sub } });
+      byEmail.auth0Sub = auth0Sub;
+      existing = byEmail;
+    }
+  }
+
   if (existing) {
     const orgDoc = existing.orgId as unknown as { _id: mongoose.Types.ObjectId; name: string; slug: string; plan: string };
     return res.json({
@@ -69,6 +82,10 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
   }
 
   // ── New user — create org, user, seed sample ─────────────────────────────
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required to create a new account.' });
+  }
+
   const baseName = name || email.split('@')[0] || 'My Sandbox';
   const orgSlug  = await Organization.uniqueSlug(baseName);
   const org = await Organization.create({

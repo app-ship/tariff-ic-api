@@ -18,6 +18,7 @@ import {
   signupUser,
   decodeIdToken,
   exchangeCodeForToken,
+  getUserProfile,
   isAuth0Configured,
   Auth0Error,
 } from '../services/auth0Service.js';
@@ -107,7 +108,20 @@ router.post('/social/exchange', async (req: Request, res: Response) => {
 
   try {
     const tokens  = await exchangeCodeForToken(code, redirectUri);
-    const profile = decodeIdToken(tokens.id_token);
+    let profile   = decodeIdToken(tokens.id_token);
+
+    // id_token may be absent or lack email when a custom audience is used.
+    // Fall back to the /userinfo endpoint which always returns the full profile.
+    if (!profile.email) {
+      const userinfo = await getUserProfile(tokens.access_token);
+      profile = {
+        sub:     profile.sub     || userinfo.sub,
+        email:   userinfo.email  || profile.email,
+        name:    profile.name    || userinfo.name,
+        picture: profile.picture || userinfo.picture,
+      };
+    }
+
     return res.json({
       token: tokens.access_token,
       profile: {

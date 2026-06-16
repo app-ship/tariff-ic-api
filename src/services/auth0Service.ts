@@ -148,3 +148,17 @@ export function decodeIdToken(idToken?: string): Auth0Profile {
     return {};
   }
 }
+
+/** Fetch user profile from Auth0 /userinfo — fallback when id_token is absent or email is missing. */
+export async function getUserProfile(accessToken: string): Promise<Auth0Profile> {
+  const { domain } = auth0Config();
+  try {
+    const res = await fetch(`https://${domain}/userinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return {};
+    return (await res.json().catch(() => ({}))) as Auth0Profile;
+  } catch {
+    return {};
+  }
+}
