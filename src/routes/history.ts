@@ -67,7 +67,9 @@ historyRouter.get('/', async (req, res, next) => {
       sampleEntry = { isSample: true, ...buildSampleResult() };
     }
 
-    const history = sampleEntry
+    // Only prepend the sample when the user has no real searches yet.
+    // Once they have at least one real result the sample card disappears automatically.
+    const history = (sampleEntry && realHistory.length === 0)
       ? [sampleEntry, ...realHistory]
       : realHistory;
 
