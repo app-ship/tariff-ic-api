@@ -35,6 +35,12 @@ resolveRouter.post('/', async (req, res) => {
       { query: query.trim(), material_name },
       { timeout: 25_000 },
     );
+    // deep-research sometimes serializes molecular_weight as a string ("44.05").
+    // Normalize it to a number so the frontend can safely call .toFixed().
+    if (data && typeof data.molecular_weight === 'string') {
+      const parsed = parseFloat(data.molecular_weight);
+      data.molecular_weight = isNaN(parsed) ? undefined : parsed;
+    }
     res.json(data);
     return;
   } catch (drErr: unknown) {
