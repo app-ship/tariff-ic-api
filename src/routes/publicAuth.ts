@@ -94,6 +94,35 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /auth/social/callback — exchange code, redirect to frontend ───────────
+// MUST be declared before /social/:provider so Express doesn't match 'callback' as a provider.
+router.get('/social/callback', async (req: Request, res: Response) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://tariffic.infis.ai';
+  const errorRedirect = `${frontendUrl}/login?error=social_auth_failed`;
+
+  const code  = req.query.code  as string | undefined;
+  const error = req.query.error as string | undefined;
+
+  if (error || !code) {
+    return res.redirect(errorRedirect);
+  }
+
+  try {
+    const callbackUrl = `${process.env.API_BASE_URL || `https://${req.headers.host}`}/auth/social/callback`;
+    const tokens  = await exchangeCodeForToken(code, callbackUrl);
+    const profile = decodeIdToken(tokens.id_token);
+
+    const params = new URLSearchParams({ token: tokens.access_token });
+    if (profile.email)   params.set('email',   profile.email);
+    if (profile.name)    params.set('name',     profile.name);
+    if (profile.picture) params.set('picture',  profile.picture);
+
+    return res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
+  } catch {
+    return res.redirect(errorRedirect);
+  }
+});
+
 // ── GET /auth/social/:provider — redirect to Auth0 authorize URL ──────────────
 // provider: 'google' | 'microsoft'
 const PROVIDER_CONNECTION: Record<string, string> = {
@@ -122,35 +151,6 @@ router.get('/social/:provider', (req: Request, res: Response) => {
   });
 
   return res.redirect(`https://${domain}/authorize?${params.toString()}`);
-});
-
-// ── GET /auth/social/callback — exchange code, redirect to frontend ───────────
-router.get('/social/callback', async (req: Request, res: Response) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://tariffic.infis.ai';
-  const errorRedirect = `${frontendUrl}/login?error=social_auth_failed`;
-
-  const code  = req.query.code  as string | undefined;
-  const error = req.query.error as string | undefined;
-
-  if (error || !code) {
-    return res.redirect(errorRedirect);
-  }
-
-  try {
-    const callbackUrl = `${process.env.API_BASE_URL || `https://${req.headers.host}`}/auth/social/callback`;
-    const tokens  = await exchangeCodeForToken(code, callbackUrl);
-    const profile = decodeIdToken(tokens.id_token);
-
-    // Pass token to the frontend via query param (short-lived; frontend stores it immediately)
-    const params = new URLSearchParams({ token: tokens.access_token });
-    if (profile.email)   params.set('email',   profile.email);
-    if (profile.name)    params.set('name',     profile.name);
-    if (profile.picture) params.set('picture',  profile.picture);
-
-    return res.redirect(`${frontendUrl}/auth/callback?${params.toString()}`);
-  } catch {
-    return res.redirect(errorRedirect);
-  }
 });
 
 function auth0Config() {
