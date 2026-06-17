@@ -6,7 +6,7 @@ export interface IUser extends Document {
   name:              string;
   picture?:          string;
   orgId:             mongoose.Types.ObjectId;
-  role:              'owner' | 'member';
+  role:              'owner' | 'member' | 'admin';
   // Onboarding answers (collected during the welcome wizard)
   jobRole?:          string;   // e.g. "Procurement"
   importCategories?: string[]; // e.g. ["electronics", "chemicals"]
@@ -28,7 +28,7 @@ const userSchema = new Schema<IUser>(
     name:              { type: String, default: '' },
     picture:           { type: String, default: '' },
     orgId:             { type: Schema.Types.ObjectId, ref: 'Organization', required: true, index: true },
-    role:              { type: String, enum: ['owner', 'member'], default: 'owner' },
+    role:              { type: String, enum: ['owner', 'member', 'admin'], default: 'owner' },
     jobRole:           { type: String, default: '' },
     importCategories:  { type: [String], default: [] },
     annualSpend:       { type: String, default: '' },

@@ -87,9 +87,6 @@ app.use('/auth', publicAuthRoutes);
 // ── Monitor cron (Cloud Scheduler) — no bearer token; guarded by X-CRON-SECRET ─
 app.use('/monitor/cron', monitorCronRouter);
 
-// ── Admin — no bearer token; guarded by X-Admin-Secret header ────────────────
-app.use('/admin', adminRouter);
-
 // ── Auth middleware (all routes below require a valid token) ──────────────────
 app.use(authMiddleware);
 
@@ -112,6 +109,7 @@ app.use('/monitor',      monitorRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/usage',        usageRouter);
 app.use('/billing',      billingRouter);
+app.use('/admin',        adminRouter);
 
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use(errorHandler);

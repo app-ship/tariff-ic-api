@@ -15,9 +15,10 @@ import { isDBConnected } from '../db.js';
 import { User } from '../models/User.js';
 
 export interface Tenant {
-  orgId: string;
-  userId: string;    // Mongo User _id as string
+  orgId:    string;
+  userId:   string;    // Mongo User _id as string
   auth0Sub: string;
+  role:     'owner' | 'member' | 'admin';
 }
 
 declare global {
@@ -57,7 +58,7 @@ export async function authMiddleware(
       res.status(500).json({ error: 'Auth not configured — set AUTH0_ISSUER_BASE_URL' });
       return;
     }
-    req.tenant = { orgId: DEFAULT_ORG, userId: DEFAULT_USER, auth0Sub: 'dev|bypass' };
+    req.tenant = { orgId: DEFAULT_ORG, userId: DEFAULT_USER, auth0Sub: 'dev|bypass', role: 'admin' };
     return next();
   }
 
@@ -93,6 +94,7 @@ export async function authMiddleware(
           orgId:    String(user.orgId),
           userId:   String(user._id),
           auth0Sub,
+          role:     user.role as 'owner' | 'member' | 'admin',
         };
         return next();
       }
@@ -103,6 +105,6 @@ export async function authMiddleware(
 
   // User not yet provisioned (bootstrap not called yet) — allow through so
   // /auth/bootstrap can create the record. Tenant uses auth0Sub as placeholder.
-  req.tenant = { orgId: '', userId: '', auth0Sub };
+  req.tenant = { orgId: '', userId: '', auth0Sub, role: 'member' };
   return next();
 }
