@@ -23,6 +23,7 @@
 
 import { Router } from 'express';
 import { Job } from '../models/Job.js';
+import { MaterialSearch } from '../models/MaterialSearch.js';
 import { onAnalyzeStart } from '../services/analysisLifecycle.js';
 import { startJobExecution } from '../services/jobRunner.js';
 import { checkCanRun } from '../services/usage.js';
@@ -39,16 +40,30 @@ analyzeRouter.post('/', async (req, res, next) => {
       return;
     }
 
-    // ── Free-tier usage gate (covers the direct-HTS path that skips classify) ─
-    const exceeded = await checkCanRun(orgId);
-    if (exceeded) {
-      res.status(402).json({
-        error: 'usage_limit_reached',
-        used:  exceeded.used,
-        limit: exceeded.limit,
-        plan:  exceeded.plan,
-      });
-      return;
+    // ── Free-tier usage gate ──────────────────────────────────────────────────
+    // In the normal flow (classify → analyze), the MaterialSearch row was already
+    // created (and counted) when classify started, so we must NOT gate again here —
+    // otherwise a user at the limit can't run tariff analysis on a material they
+    // already spent a slot on.
+    //
+    // We only gate when this is a direct-HTS analyze (no prior classify row),
+    // because that path creates a brand-new MaterialSearch row.
+    const htsCode = String(req.body.htscode ?? req.body.hts_code ?? req.body.htsCode ?? '').trim();
+    const hasExistingRow = htsCode
+      ? await MaterialSearch.exists({ orgId, htsCode, analyzeJobId: { $exists: false } })
+      : null;
+
+    if (!hasExistingRow) {
+      const exceeded = await checkCanRun(orgId);
+      if (exceeded) {
+        res.status(402).json({
+          error: 'usage_limit_reached',
+          used:  exceeded.used,
+          limit: exceeded.limit,
+          plan:  exceeded.plan,
+        });
+        return;
+      }
     }
 
     // Normalise HTS aliases so the runner always sees htscode + hts_code

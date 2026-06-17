@@ -52,9 +52,11 @@ export async function getUsage(orgId: string, plan?: string): Promise<UsageSumma
 
   let used = 0;
   if (isDBConnected() && orgId) {
+    // Count every MaterialSearch row created this month that wasn't an error —
+    // a material is "used" the moment it is first submitted, not when it completes.
     used = await MaterialSearch.countDocuments({
       orgId,
-      status:    'analyzed',
+      status:    { $nin: ['error'] },
       createdAt: { $gte: periodStart, $lt: periodEnd },
     });
   }
