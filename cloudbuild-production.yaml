@@ -46,7 +46,7 @@ steps:
       - '--timeout=600'
       - '--concurrency=80'
       - '--env-vars-file=env.production'
-      - '--set-secrets=MONGODB_URI=tariffic-mongodb-prod:latest,AUTH0_CLIENT_SECRET=TARIFF_IC_AUTH0_CLIENT_SECRET:latest,CRON_SECRET=TARIFF_IC_CRON_SECRET:latest,STRIPE_SECRET_KEY=TARIFF_IC_STRIPE_SECRET_KEY:latest,STRIPE_PRICE_ID=TARIFF_IC_STRIPE_PRICE_ID:latest,STRIPE_WEBHOOK_SECRET=TARIFF_IC_STRIPE_WEBHOOK_SECRET:latest,ADMIN_SECRET=TARIFF_IC_ADMIN_SECRET:latest'
+      - '--set-secrets=MONGODB_URI=tariffic-mongodb-prod:latest,AUTH0_CLIENT_SECRET=TARIFF_IC_AUTH0_CLIENT_SECRET:latest,CRON_SECRET=TARIFF_IC_CRON_SECRET:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY:latest,STRIPE_PRICE_ID=STRIPE_PRICE_ID:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET:latest,ADMIN_SECRET=ADMIN_SECRET:latest'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/infis-repo/tariff-ic-api:$BUILD_ID'
