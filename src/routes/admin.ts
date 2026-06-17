@@ -75,6 +75,59 @@ adminRouter.post('/set-plan', async (req: Request, res: Response) => {
   });
 });
 
+// ── GET /admin/users ─────────────────────────────────────────────────────────
+// Returns paginated user list joined with their org plan. Used by the admin UI.
+adminRouter.get('/users', async (req: Request, res: Response) => {
+  if (!guardSecret(req, res)) return;
+
+  const limit  = Math.min(200, Math.max(1, parseInt(String(req.query.limit  ?? 50))));
+  const offset = Math.max(0,               parseInt(String(req.query.offset ?? 0)));
+  const search = String(req.query.search ?? '').trim();
+  const planFilter = String(req.query.plan ?? '').trim(); // 'pro' | 'sandbox' | ''
+
+  // Build user query
+  const userQuery: Record<string, unknown> = {};
+  if (search) {
+    const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    userQuery.$or = [{ email: re }, { name: re }];
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(userQuery).sort({ createdAt: -1 }).skip(offset).limit(limit).lean(),
+    User.countDocuments(userQuery),
+  ]);
+
+  // Fetch orgs in one round-trip
+  const orgIds = [...new Set(users.map((u) => String(u.orgId)))];
+  const orgs = await Organization.find({ _id: { $in: orgIds } })
+    .select('_id name plan subscriptionStatus stripeCustomerId currentPeriodEnd createdAt')
+    .lean();
+  const orgMap = Object.fromEntries(orgs.map((o) => [String(o._id), o]));
+
+  let rows = users.map((u) => {
+    const org = orgMap[String(u.orgId)] ?? null;
+    return {
+      userId:             String(u._id),
+      email:              u.email,
+      name:               u.name,
+      role:               u.role,
+      jobRole:            u.jobRole ?? '',
+      signedUpAt:         u.createdAt,
+      orgId:              String(u.orgId),
+      orgName:            org?.name ?? '',
+      plan:               org?.plan ?? 'sandbox',
+      subscriptionStatus: org?.subscriptionStatus ?? null,
+      currentPeriodEnd:   org?.currentPeriodEnd ?? null,
+      stripeCustomerId:   org?.stripeCustomerId ?? null,
+    };
+  });
+
+  // Apply plan filter after join (cheap at these scales)
+  if (planFilter) rows = rows.filter((r) => r.plan === planFilter);
+
+  res.json({ users: rows, total, limit, offset });
+});
+
 // ── GET /admin/user ───────────────────────────────────────────────────────────
 adminRouter.get('/user', async (req: Request, res: Response) => {
   if (!guardSecret(req, res)) return;
