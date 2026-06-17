@@ -41,6 +41,9 @@ import { actRouter }         from './routes/act.js';
 import { monitorRouter }     from './routes/monitor.js';
 import { monitorCronRouter } from './routes/monitorCron.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { usageRouter }       from './routes/usage.js';
+import { billingRouter, billingWebhookHandler } from './routes/billing.js';
+import { adminRouter }       from './routes/admin.js';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT || '3002', 10);
@@ -60,6 +63,9 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// ── Stripe webhook — MUST receive the raw body, so mount before express.json ──
+app.post('/billing/webhook', express.raw({ type: 'application/json' }), billingWebhookHandler);
 
 // ── Body / logging ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '50mb' }));
@@ -81,6 +87,9 @@ app.use('/auth', publicAuthRoutes);
 // ── Monitor cron (Cloud Scheduler) — no bearer token; guarded by X-CRON-SECRET ─
 app.use('/monitor/cron', monitorCronRouter);
 
+// ── Admin — no bearer token; guarded by X-Admin-Secret header ────────────────
+app.use('/admin', adminRouter);
+
 // ── Auth middleware (all routes below require a valid token) ──────────────────
 app.use(authMiddleware);
 
@@ -101,6 +110,8 @@ app.use('/recommend',    recommendRouter);
 app.use('/act',          actRouter);
 app.use('/monitor',      monitorRouter);
 app.use('/notifications', notificationsRouter);
+app.use('/usage',        usageRouter);
+app.use('/billing',      billingRouter);
 
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use(errorHandler);

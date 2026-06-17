@@ -57,7 +57,10 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
   }
 
   if (existing) {
-    const orgDoc = existing.orgId as unknown as { _id: mongoose.Types.ObjectId; name: string; slug: string; plan: string };
+    const orgDoc = existing.orgId as unknown as {
+      _id: mongoose.Types.ObjectId; name: string; slug: string; plan: string;
+      subscriptionStatus?: string; currentPeriodEnd?: Date;
+    };
     return res.json({
       user: {
         id:             String(existing._id),
@@ -72,10 +75,12 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
         sampleSeeded:   existing.sampleSeeded,
       },
       org: {
-        id:   String(orgDoc._id),
-        name: orgDoc.name,
-        slug: orgDoc.slug,
-        plan: orgDoc.plan,
+        id:                 String(orgDoc._id),
+        name:               orgDoc.name,
+        slug:               orgDoc.slug,
+        plan:               orgDoc.plan,
+        subscriptionStatus: orgDoc.subscriptionStatus ?? null,
+        currentPeriodEnd:   orgDoc.currentPeriodEnd ?? null,
       },
       needsOnboarding: existing.onboardingStep < 1,
     });
@@ -164,7 +169,14 @@ router.get('/me', async (req: Request, res: Response) => {
       sampleSeeded:   user.sampleSeeded,
     },
     org: org
-      ? { id: String(org._id), name: org.name, slug: org.slug, plan: org.plan }
+      ? {
+          id:                 String(org._id),
+          name:               org.name,
+          slug:               org.slug,
+          plan:               org.plan,
+          subscriptionStatus: org.subscriptionStatus ?? null,
+          currentPeriodEnd:   org.currentPeriodEnd ?? null,
+        }
       : null,
   });
 });

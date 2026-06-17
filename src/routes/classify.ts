@@ -11,12 +11,25 @@ import { Router } from 'express';
 import { Job } from '../models/Job.js';
 import { onClassifyStart } from '../services/analysisLifecycle.js';
 import { startJobExecution } from '../services/jobRunner.js';
+import { checkCanRun } from '../services/usage.js';
 
 export const classifyRouter = Router();
 
 classifyRouter.post('/', async (req, res, next) => {
   try {
     const { orgId, userId } = req.tenant;
+
+    // ── Free-tier usage gate ──────────────────────────────────────────────
+    const exceeded = await checkCanRun(orgId);
+    if (exceeded) {
+      res.status(402).json({
+        error: 'usage_limit_reached',
+        used:  exceeded.used,
+        limit: exceeded.limit,
+        plan:  exceeded.plan,
+      });
+      return;
+    }
 
     const job = await Job.create({
       type:   'classify',

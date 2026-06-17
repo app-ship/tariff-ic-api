@@ -25,6 +25,7 @@ import { Router } from 'express';
 import { Job } from '../models/Job.js';
 import { onAnalyzeStart } from '../services/analysisLifecycle.js';
 import { startJobExecution } from '../services/jobRunner.js';
+import { checkCanRun } from '../services/usage.js';
 
 export const analyzeRouter = Router();
 
@@ -35,6 +36,18 @@ analyzeRouter.post('/', async (req, res, next) => {
 
     if (!Array.isArray(countries) || countries.length === 0) {
       res.status(400).json({ error: '"countries" must be a non-empty array' });
+      return;
+    }
+
+    // ── Free-tier usage gate (covers the direct-HTS path that skips classify) ─
+    const exceeded = await checkCanRun(orgId);
+    if (exceeded) {
+      res.status(402).json({
+        error: 'usage_limit_reached',
+        used:  exceeded.used,
+        limit: exceeded.limit,
+        plan:  exceeded.plan,
+      });
       return;
     }
 

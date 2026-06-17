@@ -1,24 +1,35 @@
 import mongoose, { type Document, type Model, Schema } from 'mongoose';
 
+export type SubscriptionStatus = 'active' | 'past_due' | 'canceled';
+
 export interface IOrganization extends Document {
-  name:           string;
-  slug:           string;
-  ownerUserId:    string;      // auth0Sub of the owner
-  plan:           'sandbox' | 'starter' | 'pro';
-  industry?:      string;      // collected during onboarding
-  annualSpend?:   string;      // collected during onboarding
-  createdAt:      Date;
-  updatedAt:      Date;
+  name:                 string;
+  slug:                 string;
+  ownerUserId:          string;      // auth0Sub of the owner
+  plan:                 'sandbox' | 'starter' | 'pro';
+  industry?:            string;      // collected during onboarding
+  annualSpend?:         string;      // collected during onboarding
+  // ── Billing (Stripe) ──────────────────────────────────────────────────────
+  stripeCustomerId?:    string;
+  stripeSubscriptionId?:string;
+  subscriptionStatus?:  SubscriptionStatus;
+  currentPeriodEnd?:    Date;
+  createdAt:            Date;
+  updatedAt:            Date;
 }
 
 const orgSchema = new Schema<IOrganization>(
   {
-    name:         { type: String, required: true },
-    slug:         { type: String, required: true, unique: true, lowercase: true, index: true },
-    ownerUserId:  { type: String, required: true, index: true },
-    plan:         { type: String, enum: ['sandbox', 'starter', 'pro'], default: 'sandbox' },
-    industry:     { type: String, default: '' },
-    annualSpend:  { type: String, default: '' },
+    name:                 { type: String, required: true },
+    slug:                 { type: String, required: true, unique: true, lowercase: true, index: true },
+    ownerUserId:          { type: String, required: true, index: true },
+    plan:                 { type: String, enum: ['sandbox', 'starter', 'pro'], default: 'sandbox' },
+    industry:             { type: String, default: '' },
+    annualSpend:          { type: String, default: '' },
+    stripeCustomerId:     { type: String, index: true },
+    stripeSubscriptionId: { type: String, index: true },
+    subscriptionStatus:   { type: String, enum: ['active', 'past_due', 'canceled'] },
+    currentPeriodEnd:     { type: Date },
   },
   { timestamps: true },
 );
@@ -46,3 +57,8 @@ interface OrgModel extends Model<IOrganization> {
 export const Organization =
   (mongoose.models.Organization as OrgModel) ||
   mongoose.model<IOrganization, OrgModel>('Organization', orgSchema);
+
+/** A paid org is one whose plan is 'pro'. Everything else is treated as free. */
+export function isProPlan(plan?: string | null): boolean {
+  return plan === 'pro';
+}
