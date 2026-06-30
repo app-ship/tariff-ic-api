@@ -14,6 +14,7 @@ import { Router, type Request, type Response } from 'express';
 import { requireAdmin } from '../middleware/requireAdmin.js';
 import { User } from '../models/User.js';
 import { Organization } from '../models/Organization.js';
+import { MaterialSearch } from '../models/MaterialSearch.js';
 
 export const adminRouter = Router();
 
@@ -53,6 +54,10 @@ adminRouter.get('/users', async (req: Request, res: Response) => {
       role:               u.role,
       jobRole:            u.jobRole ?? '',
       signedUpAt:         u.createdAt,
+      lastLoginAt:        u.lastLoginAt ?? null,
+      loginCount:         u.loginCount  ?? 0,
+      classifyCount:      u.classifyCount ?? 0,
+      analyzeCount:       u.analyzeCount  ?? 0,
       orgId:              String(u.orgId),
       orgName:            org?.name ?? '',
       plan:               org?.plan ?? 'sandbox',
@@ -180,4 +185,45 @@ adminRouter.post('/set-role', async (req: Request, res: Response) => {
 
   console.log(`[admin] ${req.tenant.userId} set user ${updated._id} (${email}) → role=${role}`);
   res.json({ ok: true, email, userId: String(updated._id), role: updated.role });
+});
+
+// ── GET /admin/users/:userId/usage ────────────────────────────────────────────
+adminRouter.get('/users/:userId/usage', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+
+  const user = await User.findById(userId).lean();
+  if (!user) {
+    res.status(404).json({ error: 'User not found.' });
+    return;
+  }
+
+  const [org, recentSearches] = await Promise.all([
+    Organization.findById(user.orgId)
+      .select('name plan subscriptionStatus')
+      .lean(),
+    MaterialSearch.find({ userId: String(userId) })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select('materialName htsCode status createdAt')
+      .lean(),
+  ]);
+
+  res.json({
+    userId:             String(user._id),
+    email:              user.email,
+    name:               user.name,
+    signedUpAt:         user.createdAt,
+    lastLoginAt:        user.lastLoginAt ?? null,
+    loginCount:         user.loginCount   ?? 0,
+    classifyCount:      user.classifyCount ?? 0,
+    analyzeCount:       user.analyzeCount  ?? 0,
+    plan:               org?.plan ?? 'sandbox',
+    subscriptionStatus: org?.subscriptionStatus ?? null,
+    recentSearches:     recentSearches.map((s) => ({
+      materialName: s.materialName,
+      htsCode:      s.htsCode ?? null,
+      status:       s.status,
+      createdAt:    s.createdAt,
+    })),
+  });
 });

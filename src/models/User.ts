@@ -17,6 +17,11 @@ export interface IUser extends Document {
   tourCompleted:     boolean;
   tourProgress:      Map<string, boolean>;
   sampleSeeded:      boolean;
+  // Usage counters — incremented at runtime, durable lifetime totals
+  lastLoginAt?:      Date;
+  loginCount:        number;
+  classifyCount:     number;
+  analyzeCount:      number;
   createdAt:         Date;
   updatedAt:         Date;
 }
@@ -37,6 +42,10 @@ const userSchema = new Schema<IUser>(
     tourCompleted:     { type: Boolean, default: false },
     tourProgress:      { type: Map, of: Boolean, default: {} },
     sampleSeeded:      { type: Boolean, default: false },
+    lastLoginAt:       { type: Date },
+    loginCount:        { type: Number, default: 0 },
+    classifyCount:     { type: Number, default: 0 },
+    analyzeCount:      { type: Number, default: 0 },
   },
   { timestamps: true },
 );

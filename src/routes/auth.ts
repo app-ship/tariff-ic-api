@@ -57,6 +57,12 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
   }
 
   if (existing) {
+    // Record login event — fire-and-forget, never block the response
+    User.updateOne(
+      { _id: existing._id },
+      { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } },
+    ).catch((err: Error) => console.error('[bootstrap] login counter update failed:', err));
+
     const orgDoc = existing.orgId as unknown as {
       _id: mongoose.Types.ObjectId; name: string; slug: string; plan: string;
       subscriptionStatus?: string; currentPeriodEnd?: Date;
@@ -111,6 +117,10 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
     tourCompleted:  false,
     tourProgress:   {},
     sampleSeeded:   false,
+    lastLoginAt:    new Date(),
+    loginCount:     1,
+    classifyCount:  0,
+    analyzeCount:   0,
   });
 
   // Seed sample analysis — fire-and-forget, update sampleSeeded flag when done

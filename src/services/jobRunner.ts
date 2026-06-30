@@ -137,6 +137,14 @@ export async function runClassify(job: IJob, emit: EmitFn): Promise<void> {
       console.error('[jobRunner] Failed to save MaterialSearch (classify):', saveErr);
     }
 
+    // Increment durable classifyCount on the user — fire-and-forget
+    if (userId) {
+      try {
+        const { User } = await import('../models/User.js');
+        await User.updateOne({ _id: userId }, { $inc: { classifyCount: 1 } });
+      } catch { /* non-fatal */ }
+    }
+
     // In-app completion notification
     await onClassifyComplete(job, htsCode);
   } catch (err) {
@@ -291,6 +299,14 @@ export async function runAnalyze(job: IJob, emit: EmitFn): Promise<void> {
       );
     } catch (saveErr) {
       console.error('[jobRunner] Failed to save MaterialSearch (analyze):', saveErr);
+    }
+
+    // Increment durable analyzeCount on the user (only when at least one country succeeded)
+    if (hasSuccess && userId) {
+      try {
+        const { User } = await import('../models/User.js');
+        await User.updateOne({ _id: userId }, { $inc: { analyzeCount: 1 } });
+      } catch { /* non-fatal */ }
     }
 
     // In-app completion notification
