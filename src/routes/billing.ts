@@ -84,7 +84,11 @@ billingRouter.post('/portal', async (req: Request, res: Response, next) => {
 
     const org = await Organization.findById(orgId).select('stripeCustomerId').lean();
     if (!org?.stripeCustomerId) {
-      res.status(404).json({ error: 'No billing account found' });
+      // Org was upgraded manually (admin set-plan) — no Stripe customer exists.
+      res.status(400).json({
+        error:   'no_stripe_customer',
+        message: 'Your subscription is managed by the TariffIC team. To cancel or make changes, email support@infis.ai.',
+      });
       return;
     }
 
