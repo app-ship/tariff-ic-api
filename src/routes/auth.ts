@@ -18,6 +18,7 @@ import { Organization } from '../models/Organization.js';
 import { User } from '../models/User.js';
 import { isDBConnected } from '../db.js';
 import { seedSampleAnalysis } from '../fixtures/sampleAnalysis.js';
+import { CURRENT_TERMS_VERSION } from '../config/legal.js';
 
 const router = Router();
 
@@ -35,10 +36,11 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
   }
 
   // Body params from Auth0 ID token claims forwarded by UI
-  const { email = '', name = '', picture = '' } = req.body as {
+  const { email = '', name = '', picture = '', acceptedTerms = false } = req.body as {
     email?: string;
     name?: string;
     picture?: string;
+    acceptedTerms?: boolean;
   };
 
   // ── Idempotent: look up by auth0Sub first, then by email (account linking) ──
@@ -58,9 +60,15 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
 
   if (existing) {
     // Record login event — fire-and-forget, never block the response
+    const loginUpdate: Record<string, unknown> = { lastLoginAt: new Date() };
+    // One-time backfill: stamp terms acceptance if the user signals consent and hasn't been stamped yet
+    if (acceptedTerms && !existing.termsAcceptedAt) {
+      loginUpdate.termsAcceptedAt      = new Date();
+      loginUpdate.termsAcceptedVersion = CURRENT_TERMS_VERSION;
+    }
     User.updateOne(
       { _id: existing._id },
-      { $set: { lastLoginAt: new Date() }, $inc: { loginCount: 1 } },
+      { $set: loginUpdate, $inc: { loginCount: 1 } },
     ).catch((err: Error) => console.error('[bootstrap] login counter update failed:', err));
 
     const orgDoc = existing.orgId as unknown as {
@@ -121,6 +129,10 @@ router.post('/bootstrap', async (req: Request, res: Response) => {
     loginCount:     1,
     classifyCount:  0,
     analyzeCount:   0,
+    ...(acceptedTerms ? {
+      termsAcceptedAt:      new Date(),
+      termsAcceptedVersion: CURRENT_TERMS_VERSION,
+    } : {}),
   });
 
   // Seed sample analysis — fire-and-forget, update sampleSeeded flag when done

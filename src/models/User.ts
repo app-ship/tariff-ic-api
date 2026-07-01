@@ -22,6 +22,9 @@ export interface IUser extends Document {
   loginCount:        number;
   classifyCount:     number;
   analyzeCount:      number;
+  // Terms of Service acceptance record — clickwrap audit trail
+  termsAcceptedAt?:      Date;
+  termsAcceptedVersion?: string;
   createdAt:         Date;
   updatedAt:         Date;
 }
@@ -46,6 +49,8 @@ const userSchema = new Schema<IUser>(
     loginCount:        { type: Number, default: 0 },
     classifyCount:     { type: Number, default: 0 },
     analyzeCount:      { type: Number, default: 0 },
+    termsAcceptedAt:      { type: Date },
+    termsAcceptedVersion: { type: String },
   },
   { timestamps: true },
 );
