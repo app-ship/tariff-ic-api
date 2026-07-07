@@ -50,6 +50,24 @@ steps:
       - '--env-vars-file=env.staging'
       - '--set-secrets=MONGODB_URI=TARIFF_IC_MONGODB_URI:latest,CRON_SECRET=TARIFF_IC_CRON_SECRET:latest'
 
+  # Best-effort cleanup: keep last 5 revisions, never touch the revision currently
+  # serving traffic. Never fails the build (always exits 0).
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        svc=tariff-ic-api-staging
+        serving=$$(gcloud run services describe "$$svc" --region=us-central1 --format='value(status.traffic[].revisionName)' 2>/dev/null)
+        gcloud run revisions list --service="$$svc" --region=us-central1 \
+          --sort-by='~metadata.creationTimestamp' --format='value(metadata.name)' 2>/dev/null \
+          | tail -n +6 \
+          | while read -r rev; do
+              echo "$$serving" | grep -qFx "$$rev" && continue
+              gcloud run revisions delete "$$rev" --region=us-central1 --async --quiet || true
+            done
+        exit 0
+
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/infis-repo/tariff-ic-api-staging:$BUILD_ID'
 
