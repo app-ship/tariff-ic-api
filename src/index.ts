@@ -15,6 +15,7 @@
  *   GET  /validate-cas/:cas   → validate CAS number
  *   GET  /searches            → material search history (paginated)
  *   GET  /searches/:id        → single material search detail
+ *   POST /leads/enterprise    → capture an Enterprise "Contact Us" lead
  */
 
 import 'dotenv/config';
@@ -26,6 +27,7 @@ import { connectDB }         from './db.js';
 import { authMiddleware }    from './middleware/auth.js';
 import { errorHandler }      from './middleware/errorHandler.js';
 import publicAuthRoutes      from './routes/publicAuth.js';
+import { leadsRouter }       from './routes/leads.js';
 import authRoutes            from './routes/auth.js';
 import { classifyRouter }    from './routes/classify.js';
 import { analyzeRouter }     from './routes/analyze.js';
@@ -83,6 +85,9 @@ app.get('/health', (_req, res) => {
 
 // ── Public auth (login / register) — no bearer token required ────────────────
 app.use('/auth', publicAuthRoutes);
+
+// ── Public lead capture (Enterprise "Contact Us") — no bearer token required ──
+app.use('/leads', leadsRouter);
 
 // ── Monitor cron (Cloud Scheduler) — no bearer token; guarded by X-CRON-SECRET ─
 app.use('/monitor/cron', monitorCronRouter);

@@ -23,10 +23,12 @@ classifyRouter.post('/', async (req, res, next) => {
     const exceeded = await checkCanRun(orgId);
     if (exceeded) {
       res.status(402).json({
-        error: 'usage_limit_reached',
-        used:  exceeded.used,
-        limit: exceeded.limit,
-        plan:  exceeded.plan,
+        error:      'usage_limit_reached',
+        used:       exceeded.used,
+        limit:      exceeded.limit,
+        plan:       exceeded.plan,
+        tier:       exceeded.tier,
+        upsellTier: exceeded.upsellTier,
       });
       return;
     }

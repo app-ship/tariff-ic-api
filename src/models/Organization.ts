@@ -2,13 +2,19 @@ import mongoose, { type Document, type Model, Schema } from 'mongoose';
 
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled';
 
+export type OrgPlan = 'sandbox' | 'starter' | 'pro' | 'enterprise';
+
 export interface IOrganization extends Document {
   name:                 string;
   slug:                 string;
   ownerUserId:          string;      // auth0Sub of the owner
-  plan:                 'sandbox' | 'starter' | 'pro';
+  plan:                 OrgPlan;
   industry?:            string;      // collected during onboarding
   annualSpend?:         string;      // collected during onboarding
+  /** Anchor timestamp for the free-tier lifetime usage count. Reset by an admin
+   *  to give a free org a fresh allotment of analyses. Undefined = count from
+   *  the beginning of time (all history). */
+  usageResetAt?:        Date;
   // ── Billing (Stripe) ──────────────────────────────────────────────────────
   stripeCustomerId?:    string;
   stripeSubscriptionId?:string;
@@ -23,9 +29,10 @@ const orgSchema = new Schema<IOrganization>(
     name:                 { type: String, required: true },
     slug:                 { type: String, required: true, unique: true, lowercase: true, index: true },
     ownerUserId:          { type: String, required: true, index: true },
-    plan:                 { type: String, enum: ['sandbox', 'starter', 'pro'], default: 'sandbox' },
+    plan:                 { type: String, enum: ['sandbox', 'starter', 'pro', 'enterprise'], default: 'sandbox' },
     industry:             { type: String, default: '' },
     annualSpend:          { type: String, default: '' },
+    usageResetAt:         { type: Date },
     stripeCustomerId:     { type: String, index: true },
     stripeSubscriptionId: { type: String, index: true },
     subscriptionStatus:   { type: String, enum: ['active', 'past_due', 'canceled'] },
@@ -58,7 +65,15 @@ export const Organization =
   (mongoose.models.Organization as OrgModel) ||
   mongoose.model<IOrganization, OrgModel>('Organization', orgSchema);
 
-/** A paid org is one whose plan is 'pro'. Everything else is treated as free. */
-export function isProPlan(plan?: string | null): boolean {
-  return plan === 'pro';
+/** A paid org is one whose plan unlocks all features (Pro or Enterprise). */
+export function isPaidPlan(plan?: string | null): boolean {
+  return plan === 'pro' || plan === 'enterprise';
 }
+
+/** Monthly/lifetime analysis allowance per plan. null = unlimited. */
+export const PLAN_LIMITS: Record<OrgPlan, number | null> = {
+  sandbox:    5,     // lifetime allowance (resettable by an admin)
+  starter:    5,     // legacy value, treated like sandbox
+  pro:        100,   // monthly allowance, auto-resets each calendar month
+  enterprise: null,  // unlimited
+};

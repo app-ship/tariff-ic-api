@@ -3,8 +3,11 @@
  *
  * GET  /admin/users              → paginated user list (joined with org plan)
  * GET  /admin/user?email=…       → single user + org detail
- * POST /admin/set-plan           → flip any org's plan (sandbox | starter | pro)
+ * POST /admin/set-plan           → flip any org's plan (sandbox | starter | pro | enterprise)
  * POST /admin/set-role           → change a user's role (owner | member | admin)
+ * POST /admin/reset-usage        → reset a free org's lifetime analysis counter
+ * GET  /admin/stats              → plan distribution + Pro-near-cap counts
+ * GET  /admin/leads              → Enterprise "Contact Us" leads
  *
  * All routes require a valid Bearer token AND req.tenant.role === 'admin'.
  * Mount this router AFTER authMiddleware in index.ts.
@@ -15,6 +18,8 @@ import { requireAdmin } from '../middleware/requireAdmin.js';
 import { User } from '../models/User.js';
 import { Organization } from '../models/Organization.js';
 import { MaterialSearch } from '../models/MaterialSearch.js';
+import { EnterpriseLead } from '../models/EnterpriseLead.js';
+import { PRO_ANALYSIS_LIMIT } from '../services/usage.js';
 
 export const adminRouter = Router();
 
@@ -114,8 +119,8 @@ adminRouter.post('/set-plan', async (req: Request, res: Response) => {
     res.status(400).json({ error: '"email" and "plan" are required.' });
     return;
   }
-  if (!['sandbox', 'starter', 'pro'].includes(plan)) {
-    res.status(400).json({ error: '"plan" must be one of: sandbox, starter, pro' });
+  if (!['sandbox', 'starter', 'pro', 'enterprise'].includes(plan)) {
+    res.status(400).json({ error: '"plan" must be one of: sandbox, starter, pro, enterprise' });
     return;
   }
 
@@ -130,7 +135,7 @@ adminRouter.post('/set-plan', async (req: Request, res: Response) => {
     {
       $set: {
         plan,
-        ...(plan === 'pro'
+        ...(plan === 'pro' || plan === 'enterprise'
           ? { subscriptionStatus: 'active' }
           : { subscriptionStatus: 'canceled', stripeSubscriptionId: null, currentPeriodEnd: null }),
       },
@@ -185,6 +190,114 @@ adminRouter.post('/set-role', async (req: Request, res: Response) => {
 
   console.log(`[admin] ${req.tenant.userId} set user ${updated._id} (${email}) → role=${role}`);
   res.json({ ok: true, email, userId: String(updated._id), role: updated.role });
+});
+
+// ── POST /admin/reset-usage ────────────────────────────────────────────────────
+// Resets a free (sandbox/starter) org's lifetime analysis counter by moving its
+// usage-reset anchor to now. Has no effect on Pro (monthly, auto-resets) or
+// Enterprise (unlimited) orgs.
+adminRouter.post('/reset-usage', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+  if (!email) {
+    res.status(400).json({ error: '"email" is required.' });
+    return;
+  }
+
+  const user = await User.findOne({ email: email.toLowerCase().trim() }).lean();
+  if (!user) {
+    res.status(404).json({ error: `No user found with email "${email}".` });
+    return;
+  }
+
+  const now = new Date();
+  const org = await Organization.findByIdAndUpdate(
+    user.orgId,
+    { $set: { usageResetAt: now } },
+    { new: true },
+  ).select('plan usageResetAt').lean();
+
+  if (!org) {
+    res.status(404).json({ error: 'Organization record not found.' });
+    return;
+  }
+
+  console.log(`[admin] ${req.tenant.userId} reset usage for org ${String(org._id)} (${email})`);
+  res.json({ ok: true, email, orgId: String(org._id), plan: org.plan, usageResetAt: org.usageResetAt });
+});
+
+// ── GET /admin/stats ───────────────────────────────────────────────────────────
+// Plan distribution + how many Pro orgs are close to (or over) their monthly cap.
+adminRouter.get('/stats', async (_req: Request, res: Response) => {
+  const orgs = await Organization.find({}).select('_id plan').lean();
+
+  const byPlan: Record<string, number> = { sandbox: 0, starter: 0, pro: 0, enterprise: 0 };
+  for (const org of orgs) {
+    const p = org.plan ?? 'sandbox';
+    byPlan[p] = (byPlan[p] ?? 0) + 1;
+  }
+
+  const proOrgIds = orgs.filter((o) => o.plan === 'pro').map((o) => String(o._id));
+
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  const monthEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
+
+  const NEAR_CAP_THRESHOLD = 0.8; // 80% of the monthly cap counts as "near cap"
+  let proNearCap = 0;
+  let proOverCap = 0;
+
+  if (proOrgIds.length) {
+    const counts = await MaterialSearch.aggregate<{ _id: string; count: number }>([
+      { $match: { orgId: { $in: proOrgIds }, status: { $nin: ['error'] }, createdAt: { $gte: monthStart, $lt: monthEnd } } },
+      { $group: { _id: '$orgId', count: { $sum: 1 } } },
+    ]);
+    for (const row of counts) {
+      if (row.count >= PRO_ANALYSIS_LIMIT) proOverCap += 1;
+      else if (row.count >= PRO_ANALYSIS_LIMIT * NEAR_CAP_THRESHOLD) proNearCap += 1;
+    }
+  }
+
+  const leadCount = await EnterpriseLead.countDocuments({});
+
+  res.json({
+    byPlan: {
+      free:       byPlan.sandbox + byPlan.starter,
+      pro:        byPlan.pro,
+      enterprise: byPlan.enterprise,
+    },
+    proCap:            PRO_ANALYSIS_LIMIT,
+    proNearCapCount:   proNearCap,
+    proOverCapCount:   proOverCap,
+    enterpriseLeadCount: leadCount,
+  });
+});
+
+// ── GET /admin/leads ───────────────────────────────────────────────────────────
+adminRouter.get('/leads', async (req: Request, res: Response) => {
+  const limit  = Math.min(200, Math.max(1, parseInt(String(req.query.limit  ?? 50))));
+  const offset = Math.max(0,               parseInt(String(req.query.offset ?? 0)));
+
+  const [leads, total] = await Promise.all([
+    EnterpriseLead.find({}).sort({ createdAt: -1 }).skip(offset).limit(limit).lean(),
+    EnterpriseLead.countDocuments({}),
+  ]);
+
+  res.json({
+    leads: leads.map((l) => ({
+      id:             String(l._id),
+      companyName:    l.companyName,
+      companySize:    l.companySize,
+      useCase:        l.useCase,
+      expectedVolume: l.expectedVolume,
+      contactName:    l.contactName,
+      email:          l.email,
+      status:         l.status,
+      createdAt:      l.createdAt,
+    })),
+    total,
+    limit,
+    offset,
+  });
 });
 
 // ── GET /admin/users/:userId/usage ────────────────────────────────────────────

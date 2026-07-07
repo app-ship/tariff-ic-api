@@ -37,6 +37,12 @@ billingRouter.post('/checkout', async (req: Request, res: Response, next) => {
       res.status(409).json({ error: 'Already on Pro' });
       return;
     }
+    if (org.plan === 'enterprise') {
+      // Enterprise is sales-assisted only — never route an Enterprise org through
+      // self-serve Stripe Checkout (that would silently downgrade their terms).
+      res.status(409).json({ error: 'Your organization is on an Enterprise plan. Contact your account manager for billing changes.' });
+      return;
+    }
 
     const user = await User.findOne({ auth0Sub }).select('email name').lean();
 
