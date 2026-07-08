@@ -74,6 +74,6 @@ export function isPaidPlan(plan?: string | null): boolean {
 export const PLAN_LIMITS: Record<OrgPlan, number | null> = {
   sandbox:    5,     // lifetime allowance (resettable by an admin)
   starter:    5,     // legacy value, treated like sandbox
-  pro:        100,   // monthly allowance, auto-resets each calendar month
+  pro:        50,    // monthly allowance, auto-resets each calendar month
   enterprise: null,  // unlimited
 };

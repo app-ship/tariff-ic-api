@@ -9,7 +9,7 @@
  *  - Free (sandbox/starter): 5 analyses LIFETIME, counted from org.usageResetAt
  *    (or the beginning of time if never reset). An admin can reset this from
  *    the Admin page to grant a fresh allotment.
- *  - Pro: 100 analyses per CALENDAR MONTH — self-resets on the 1st.
+ *  - Pro: 50 analyses per CALENDAR MONTH — self-resets on the 1st.
  *  - Enterprise: unlimited.
  */
 
