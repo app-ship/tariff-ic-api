@@ -36,10 +36,51 @@ export function isAuth0Configured(): boolean {
   return Boolean(domain && clientId && clientSecret);
 }
 
+interface Auth0PasswordRule {
+  message?:  string;
+  format?:   unknown[];
+  verified?: boolean;
+  rules?:    Auth0PasswordRule[]; // rules can nest (e.g. "contains at least N of the following")
+}
+
+/**
+ * Auth0's PasswordStrengthError returns `description` as a structured object
+ * (`{ rules: [...], verified: false }`), not a string — one rule per password
+ * policy requirement, each with a `verified` flag and a `%d`-templated
+ * `message`. Flatten the unmet rules into one readable sentence.
+ */
+function describePasswordPolicyFailure(description: unknown): string | null {
+  if (!description || typeof description !== 'object') return null;
+  const topRules = (description as Auth0PasswordRule).rules;
+  if (!Array.isArray(topRules)) return null;
+
+  const messages: string[] = [];
+  const visit = (rules: Auth0PasswordRule[]) => {
+    for (const rule of rules) {
+      if (rule.verified === false && typeof rule.message === 'string') {
+        let msg = rule.message;
+        if (Array.isArray(rule.format)) {
+          let i = 0;
+          msg = msg.replace(/%d/g, () => String(rule.format![i++]));
+        }
+        messages.push(msg.replace(/:$/, ''));
+      }
+      if (Array.isArray(rule.rules)) visit(rule.rules);
+    }
+  };
+  visit(topRules);
+
+  return messages.length ? `Password does not meet requirements: ${messages.join('; ')}.` : null;
+}
+
 /** Map an Auth0 error body to a friendly, consumer-facing message. */
-function friendlyAuthError(status: number, body: { error?: string; error_description?: string; description?: string; code?: string }): string {
+function friendlyAuthError(status: number, body: { error?: string; error_description?: unknown; description?: unknown; code?: string }): string {
   const code = body.error || body.code || '';
-  const desc = body.error_description || body.description || '';
+  const rawDesc = body.error_description ?? body.description;
+  // Auth0 usually sends a string, but PasswordStrengthError sends an object —
+  // never let a non-string value reach `new Error(...)` (it would stringify
+  // to the useless literal "[object Object]").
+  const desc = typeof rawDesc === 'string' ? rawDesc : '';
 
   if (code === 'invalid_grant' || /wrong email or password/i.test(desc)) {
     return 'Incorrect email or password.';
@@ -51,7 +92,9 @@ function friendlyAuthError(status: number, body: { error?: string; error_descrip
     return 'An account with this email already exists.';
   }
   if (code === 'invalid_password' || /password/i.test(desc)) {
-    return desc || 'Password does not meet the requirements.';
+    return describePasswordPolicyFailure(rawDesc)
+      || desc
+      || 'Password does not meet the requirements. Try a longer password with a mix of letters, numbers, and symbols.';
   }
   if (status === 429) {
     return 'Too many requests. Please try again shortly.';
@@ -62,7 +105,10 @@ function friendlyAuthError(status: number, body: { error?: string; error_descrip
 export class Auth0Error extends Error {
   status: number;
   constructor(message: string, status = 400) {
-    super(message);
+    // Defense in depth: Error's native constructor stringifies non-string
+    // messages via ToString, which turns a plain object into the useless
+    // literal "[object Object]" — fall back to a generic message instead.
+    super(typeof message === 'string' && message ? message : 'Authentication failed. Please try again.');
     this.status = status;
     this.name = 'Auth0Error';
   }
