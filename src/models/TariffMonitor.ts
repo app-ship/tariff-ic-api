@@ -47,7 +47,11 @@ export interface ITariffMonitor extends Document {
   // baseline for a Chapter 29/30 material would be wrong.
   productStatus?: string;          // patented | generic | biosimilar | cgt | orphan
   itemType?:      string;          // KSM | RSM | intermediate | solvent | reagent | API
-  companyName?:   string;          // importer/manufacturer for Annex II/III matching
+  // Importer of record only. Annex II and Annex III standing is a property of
+  // the importer, not of the foreign manufacturer or exporter — that is a
+  // separate field used for company-specific AD/CVD rates. Populating this from
+  // a supplier or manufacturer name changes the duty in both directions.
+  companyName?:   string;
 
   frequency:    MonitorFrequency;
   channels:     { inApp: boolean; email: boolean };

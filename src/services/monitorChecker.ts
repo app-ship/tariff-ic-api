@@ -77,6 +77,21 @@ export interface PharmaContext {
   companyName?:   string;
 }
 
+/**
+ * Qualify a rate that is not a true ad valorem percentage.
+ *
+ * deep-research reduces specific and compound duties (cents per kilogram, and
+ * the like) to a percentage against a fixed nominal customs value so they can be
+ * compared at all. The number moves with that assumption, not only with the
+ * tariff, so an alert quoting it bare would overstate what we know.
+ */
+function equivalenceNote(entry?: BaselineApiEntry): string | undefined {
+  return entry?.ad_valorem_equivalent
+    ? 'Ad valorem equivalent: this line carries a specific or compound duty, '
+      + 'converted against a nominal customs value for comparison.'
+    : undefined;
+}
+
 /** Fetch the cheap deterministic baseline for an HTS code across countries. */
 export async function fetchBaseline(
   htsCode: string,
@@ -114,6 +129,12 @@ export async function buildBaselineSnapshot(
     ruleSignature:     e.rule_signature ?? '',
     applicableRuleIds: e.applicable_rule_ids ?? [],
     capturedAt:        now,
+    // Must be stored with the signature it describes. Relying on the schema
+    // default would stamp a fresh snapshot as version 1 whatever the engine
+    // actually returned, so the first check after creation would compare across
+    // a version boundary it invented, take the re-baseline branch, and swallow
+    // a real rule change.
+    baselineVersion:   e.baseline_version ?? 1,
   }));
 }
 
@@ -191,6 +212,10 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
     for (const e of fresh) freshByCountry.set(e.country, e);
 
     let baselineDelta = false;
+    // Countries whose stored snapshot came from a superseded engine contract.
+    // Their cached effectiveRate is not comparable to a fresh one either, so the
+    // write-back below refreshes it rather than carrying it forward.
+    const restamped = new Set<string>();
     for (const e of fresh) {
       const prev = baselineByCountry.get(e.country);
       if (!prev) continue; // newly added country — seeded below, not an alert
@@ -200,6 +225,7 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
         changes.push({
           detectedAt: now, country: e.country, field: 'baseMfnRate',
           previousValue: prev.baseMfnRate ?? null, newValue: newBase, source: 'baseline',
+          note: equivalenceNote(e),
         });
       }
       // Signatures are only comparable within one baseline contract version.
@@ -213,6 +239,7 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
       const sameContract = prevVersion === freshVersion;
 
       if (!sameContract) {
+        restamped.add(e.country);
         console.log(
           `[monitor ${monitorId}] baseline contract v${prevVersion} → v${freshVersion} ` +
           `for ${e.country}; re-baselining signature without raising a rule change`,
@@ -244,6 +271,7 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
           changes.push({
             detectedAt: now, country, field: 'effectiveRate',
             previousValue: prev.effectiveRate ?? null, newValue: r.effectiveRate, source: 'analysis',
+            note: equivalenceNote(freshByCountry.get(country)),
           });
         }
       }
@@ -254,10 +282,19 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
       const fE = freshByCountry.get(country);
       const prev = baselineByCountry.get(country);
       const full = fullResults?.get(country);
+      // A full re-analysis is the best figure available. Failing that, keep the
+      // stored one — except where the contract version moved, since that value
+      // was produced by an engine whose output is no longer comparable. Carrying
+      // it forward would leave a snapshot holding a v2 signature beside a v1
+      // rate, and the next weekly full check would read the mismatch as a tariff
+      // move: the same alert the version guard above exists to suppress, only
+      // delayed by a week.
       const effectiveRate =
         full && full.effectiveRate != null
           ? full.effectiveRate
-          : (prev?.effectiveRate ?? num(fE?.effective_rate_estimate ?? null));
+          : restamped.has(country)
+            ? (num(fE?.effective_rate_estimate ?? null) ?? prev?.effectiveRate ?? null)
+            : (prev?.effectiveRate ?? num(fE?.effective_rate_estimate ?? null));
       return {
         country,
         baseMfnRate:       num(fE?.base_mfn_rate ?? null) ?? (prev?.baseMfnRate ?? null),
