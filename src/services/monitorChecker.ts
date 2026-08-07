@@ -31,6 +31,10 @@ interface BaselineApiEntry {
   applicable_rule_ids: string[];
   rule_signature: string;
   effective_rate_estimate: number | null;
+  /** Bumped by deep-research when the meaning of the fields above changes. */
+  baseline_version?: number;
+  /** Rate includes a specific or compound line reduced against a nominal value. */
+  ad_valorem_equivalent?: boolean;
 }
 
 export interface MonitorCheckResult {
@@ -59,11 +63,40 @@ function ratesDiffer(a: number | null, b: number | null): boolean {
   return Math.abs(a - b) >= RATE_EPSILON;
 }
 
+/**
+ * Product context that changes the rate but not the HTS code. Section 232
+ * pharmaceuticals swing between 0% and a 100% ceiling on productStatus alone,
+ * so a baseline captured without it is not comparable to the customer's
+ * Tariff Intelligence result.
+ */
+export interface PharmaContext {
+  casNumber?:     string;
+  materialName?:  string;
+  productStatus?: string;
+  itemType?:      string;
+  companyName?:   string;
+}
+
+/**
+ * Qualify a rate that is not a true ad valorem percentage.
+ *
+ * deep-research reduces specific and compound duties (cents per kilogram, and
+ * the like) to a percentage against a fixed nominal customs value so they can be
+ * compared at all. The number moves with that assumption, not only with the
+ * tariff, so an alert quoting it bare would overstate what we know.
+ */
+function equivalenceNote(entry?: BaselineApiEntry): string | undefined {
+  return entry?.ad_valorem_equivalent
+    ? 'Ad valorem equivalent: this line carries a specific or compound duty, '
+      + 'converted against a nominal customs value for comparison.'
+    : undefined;
+}
+
 /** Fetch the cheap deterministic baseline for an HTS code across countries. */
 export async function fetchBaseline(
   htsCode: string,
   countries: string[],
-  opts: { casNumber?: string; materialName?: string } = {},
+  opts: PharmaContext = {},
 ): Promise<BaselineApiEntry[]> {
   const { data } = await drClient.post(
     '/material/tariff/baseline',
@@ -72,6 +105,9 @@ export async function fetchBaseline(
       countries,
       cas_number: opts.casNumber,
       material_name: opts.materialName,
+      product_status: opts.productStatus,
+      item_type: opts.itemType,
+      company_name: opts.companyName,
     },
     { timeout: 60_000 },
   );
@@ -82,7 +118,7 @@ export async function fetchBaseline(
 export async function buildBaselineSnapshot(
   htsCode: string,
   countries: string[],
-  opts: { casNumber?: string; materialName?: string } = {},
+  opts: PharmaContext = {},
 ): Promise<IMonitorBaselineEntry[]> {
   const entries = await fetchBaseline(htsCode, countries, opts);
   const now = new Date();
@@ -93,6 +129,12 @@ export async function buildBaselineSnapshot(
     ruleSignature:     e.rule_signature ?? '',
     applicableRuleIds: e.applicable_rule_ids ?? [],
     capturedAt:        now,
+    // Must be stored with the signature it describes. Relying on the schema
+    // default would stamp a fresh snapshot as version 1 whatever the engine
+    // actually returned, so the first check after creation would compare across
+    // a version boundary it invented, take the re-baseline branch, and swallow
+    // a real rule change.
+    baselineVersion:   e.baseline_version ?? 1,
   }));
 }
 
@@ -116,6 +158,9 @@ async function runFullAnalysis(
             import_country: country,
             annual_spend:   '0',
             cas_number:     monitor.casNumber,
+            product_status: monitor.productStatus,
+            item_type:      monitor.itemType,
+            company_name:   monitor.companyName,
             org_id:         monitor.orgId,
             user_id:        monitor.userId,
             async_mode:     false,
@@ -159,11 +204,18 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
     const fresh = await fetchBaseline(monitor.htsCode, monitor.countries ?? [], {
       casNumber: monitor.casNumber,
       materialName: monitor.materialName,
+      productStatus: monitor.productStatus,
+      itemType: monitor.itemType,
+      companyName: monitor.companyName,
     });
     const freshByCountry = new Map<string, BaselineApiEntry>();
     for (const e of fresh) freshByCountry.set(e.country, e);
 
     let baselineDelta = false;
+    // Countries whose stored snapshot came from a superseded engine contract.
+    // Their cached effectiveRate is not comparable to a fresh one either, so the
+    // write-back below refreshes it rather than carrying it forward.
+    const restamped = new Set<string>();
     for (const e of fresh) {
       const prev = baselineByCountry.get(e.country);
       if (!prev) continue; // newly added country — seeded below, not an alert
@@ -173,9 +225,26 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
         changes.push({
           detectedAt: now, country: e.country, field: 'baseMfnRate',
           previousValue: prev.baseMfnRate ?? null, newValue: newBase, source: 'baseline',
+          note: equivalenceNote(e),
         });
       }
-      if ((prev.ruleSignature ?? '') !== (e.rule_signature ?? '')) {
+      // Signatures are only comparable within one baseline contract version.
+      // When deep-research changes what goes into the hash, every monitored line's
+      // signature moves at once; diffing across that boundary would raise a rule
+      // change on all of them and force a full AI re-analysis of the entire
+      // monitor population in a single pass. Re-baseline silently instead — the
+      // rate comparison below still runs, so a genuine tariff move is not missed.
+      const prevVersion  = prev.baselineVersion ?? 1;
+      const freshVersion = e.baseline_version ?? 1;
+      const sameContract = prevVersion === freshVersion;
+
+      if (!sameContract) {
+        restamped.add(e.country);
+        console.log(
+          `[monitor ${monitorId}] baseline contract v${prevVersion} → v${freshVersion} ` +
+          `for ${e.country}; re-baselining signature without raising a rule change`,
+        );
+      } else if ((prev.ruleSignature ?? '') !== (e.rule_signature ?? '')) {
         baselineDelta = true;
         changes.push({
           detectedAt: now, country: e.country, field: 'rules',
@@ -202,6 +271,7 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
           changes.push({
             detectedAt: now, country, field: 'effectiveRate',
             previousValue: prev.effectiveRate ?? null, newValue: r.effectiveRate, source: 'analysis',
+            note: equivalenceNote(freshByCountry.get(country)),
           });
         }
       }
@@ -212,10 +282,19 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
       const fE = freshByCountry.get(country);
       const prev = baselineByCountry.get(country);
       const full = fullResults?.get(country);
+      // A full re-analysis is the best figure available. Failing that, keep the
+      // stored one — except where the contract version moved, since that value
+      // was produced by an engine whose output is no longer comparable. Carrying
+      // it forward would leave a snapshot holding a v2 signature beside a v1
+      // rate, and the next weekly full check would read the mismatch as a tariff
+      // move: the same alert the version guard above exists to suppress, only
+      // delayed by a week.
       const effectiveRate =
         full && full.effectiveRate != null
           ? full.effectiveRate
-          : (prev?.effectiveRate ?? num(fE?.effective_rate_estimate ?? null));
+          : restamped.has(country)
+            ? (num(fE?.effective_rate_estimate ?? null) ?? prev?.effectiveRate ?? null)
+            : (prev?.effectiveRate ?? num(fE?.effective_rate_estimate ?? null));
       return {
         country,
         baseMfnRate:       num(fE?.base_mfn_rate ?? null) ?? (prev?.baseMfnRate ?? null),
@@ -223,6 +302,9 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
         ruleSignature:     fE?.rule_signature ?? prev?.ruleSignature ?? '',
         applicableRuleIds: fE?.applicable_rule_ids ?? prev?.applicableRuleIds ?? [],
         capturedAt:        now,
+        // Stored alongside the signature it belongs to, so the next run knows
+        // whether the two are comparable.
+        baselineVersion:   fE?.baseline_version ?? prev?.baselineVersion ?? 1,
       };
     });
 

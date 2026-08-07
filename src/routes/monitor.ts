@@ -73,16 +73,21 @@ monitorRouter.post('/', async (req, res, next) => {
       emailAddress = user?.email;
     }
 
+    const pharmaContext = {
+      casNumber:     body.casNumber ? String(body.casNumber) : undefined,
+      materialName,
+      productStatus: body.productStatus ? String(body.productStatus) : undefined,
+      itemType:      body.itemType ? String(body.itemType) : undefined,
+      companyName:   body.companyName ? String(body.companyName) : undefined,
+    };
+
     // Compute the initial baseline up-front (cheap, deterministic). If the engine
     // is unavailable, create with an empty baseline + immediate nextCheckAt so the
     // cron run seeds it on the next tick.
     let baseline = [] as Awaited<ReturnType<typeof buildBaselineSnapshot>>;
     let nextCheckAt = computeNextCheckAt(frequency);
     try {
-      baseline = await buildBaselineSnapshot(htsCode, countries, {
-        casNumber: body.casNumber ? String(body.casNumber) : undefined,
-        materialName,
-      });
+      baseline = await buildBaselineSnapshot(htsCode, countries, pharmaContext);
     } catch (e) {
       console.error('[monitor] initial baseline failed, will seed on next cron:', (e as Error).message);
       nextCheckAt = new Date();
@@ -93,7 +98,10 @@ monitorRouter.post('/', async (req, res, next) => {
       userId,
       materialName,
       htsCode,
-      casNumber:      body.casNumber ? String(body.casNumber) : undefined,
+      casNumber:      pharmaContext.casNumber,
+      productStatus:  pharmaContext.productStatus,
+      itemType:       pharmaContext.itemType,
+      companyName:    pharmaContext.companyName,
       destination:    body.destination ? String(body.destination) : 'USA',
       countries,
       sourceSearchId: body.sourceSearchId ? String(body.sourceSearchId) : undefined,
@@ -156,6 +164,8 @@ monitorRouter.patch('/:id', async (req, res, next) => {
         try {
           existing.baseline = await buildBaselineSnapshot(existing.htsCode, countries, {
             casNumber: existing.casNumber, materialName: existing.materialName,
+            productStatus: existing.productStatus, itemType: existing.itemType,
+            companyName: existing.companyName,
           });
           existing.lastCheckedAt = new Date();
         } catch {

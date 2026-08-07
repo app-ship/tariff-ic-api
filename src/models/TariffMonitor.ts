@@ -11,6 +11,14 @@ export interface IMonitorBaselineEntry {
   ruleSignature:     string;          // hash of active rule ids + rates
   applicableRuleIds: string[];
   capturedAt:        Date;
+  /**
+   * Which deep-research baseline contract produced ruleSignature. A signature is
+   * only comparable against one from the same version: when the engine behind the
+   * baseline changes, every hash changes at once for reasons that have nothing to
+   * do with tariffs, and diffing across the boundary would report a rule change on
+   * every monitored line.
+   */
+  baselineVersion?:  number;
 }
 
 /** An observed change appended to the monitor's history. */
@@ -33,6 +41,17 @@ export interface ITariffMonitor extends Document {
   destination:  string;            // import destination, defaults to 'USA'
   countries:    string[];          // origin countries being monitored
   sourceSearchId?: string;         // MaterialSearch this monitor was created from
+
+  // Section 232 pharmaceutical context. Without these the engine cannot tell a
+  // patented product (100% ceiling) from a generic (0%), so a monitored
+  // baseline for a Chapter 29/30 material would be wrong.
+  productStatus?: string;          // patented | generic | biosimilar | cgt | orphan
+  itemType?:      string;          // KSM | RSM | intermediate | solvent | reagent | API
+  // Importer of record only. Annex II and Annex III standing is a property of
+  // the importer, not of the foreign manufacturer or exporter — that is a
+  // separate field used for company-specific AD/CVD rates. Populating this from
+  // a supplier or manufacturer name changes the duty in both directions.
+  companyName?:   string;
 
   frequency:    MonitorFrequency;
   channels:     { inApp: boolean; email: boolean };
@@ -59,6 +78,8 @@ const baselineEntrySchema = new Schema<IMonitorBaselineEntry>(
     ruleSignature:     { type: String, default: '' },
     applicableRuleIds: { type: [String], default: [] },
     capturedAt:        { type: Date, default: Date.now },
+    // Absent on baselines captured before versioning; treated as version 1.
+    baselineVersion:   { type: Number, default: 1 },
   },
   { _id: false },
 );
@@ -86,6 +107,10 @@ const tariffMonitorSchema = new Schema<ITariffMonitor>(
     destination:    { type: String, default: 'USA' },
     countries:      { type: [String], default: [] },
     sourceSearchId: { type: String },
+
+    productStatus:  { type: String },
+    itemType:       { type: String },
+    companyName:    { type: String },
 
     frequency:    { type: String, enum: ['daily', 'weekly'], default: 'daily' },
     channels:     {
