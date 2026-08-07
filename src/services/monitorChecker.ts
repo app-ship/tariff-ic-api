@@ -59,11 +59,25 @@ function ratesDiffer(a: number | null, b: number | null): boolean {
   return Math.abs(a - b) >= RATE_EPSILON;
 }
 
+/**
+ * Product context that changes the rate but not the HTS code. Section 232
+ * pharmaceuticals swing between 0% and a 100% ceiling on productStatus alone,
+ * so a baseline captured without it is not comparable to the customer's
+ * Tariff Intelligence result.
+ */
+export interface PharmaContext {
+  casNumber?:     string;
+  materialName?:  string;
+  productStatus?: string;
+  itemType?:      string;
+  companyName?:   string;
+}
+
 /** Fetch the cheap deterministic baseline for an HTS code across countries. */
 export async function fetchBaseline(
   htsCode: string,
   countries: string[],
-  opts: { casNumber?: string; materialName?: string } = {},
+  opts: PharmaContext = {},
 ): Promise<BaselineApiEntry[]> {
   const { data } = await drClient.post(
     '/material/tariff/baseline',
@@ -72,6 +86,9 @@ export async function fetchBaseline(
       countries,
       cas_number: opts.casNumber,
       material_name: opts.materialName,
+      product_status: opts.productStatus,
+      item_type: opts.itemType,
+      company_name: opts.companyName,
     },
     { timeout: 60_000 },
   );
@@ -82,7 +99,7 @@ export async function fetchBaseline(
 export async function buildBaselineSnapshot(
   htsCode: string,
   countries: string[],
-  opts: { casNumber?: string; materialName?: string } = {},
+  opts: PharmaContext = {},
 ): Promise<IMonitorBaselineEntry[]> {
   const entries = await fetchBaseline(htsCode, countries, opts);
   const now = new Date();
@@ -116,6 +133,9 @@ async function runFullAnalysis(
             import_country: country,
             annual_spend:   '0',
             cas_number:     monitor.casNumber,
+            product_status: monitor.productStatus,
+            item_type:      monitor.itemType,
+            company_name:   monitor.companyName,
             org_id:         monitor.orgId,
             user_id:        monitor.userId,
             async_mode:     false,
@@ -159,6 +179,9 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
     const fresh = await fetchBaseline(monitor.htsCode, monitor.countries ?? [], {
       casNumber: monitor.casNumber,
       materialName: monitor.materialName,
+      productStatus: monitor.productStatus,
+      itemType: monitor.itemType,
+      companyName: monitor.companyName,
     });
     const freshByCountry = new Map<string, BaselineApiEntry>();
     for (const e of fresh) freshByCountry.set(e.country, e);

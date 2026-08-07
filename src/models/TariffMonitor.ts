@@ -34,6 +34,13 @@ export interface ITariffMonitor extends Document {
   countries:    string[];          // origin countries being monitored
   sourceSearchId?: string;         // MaterialSearch this monitor was created from
 
+  // Section 232 pharmaceutical context. Without these the engine cannot tell a
+  // patented product (100% ceiling) from a generic (0%), so a monitored
+  // baseline for a Chapter 29/30 material would be wrong.
+  productStatus?: string;          // patented | generic | biosimilar | cgt | orphan
+  itemType?:      string;          // KSM | RSM | intermediate | solvent | reagent | API
+  companyName?:   string;          // importer/manufacturer for Annex II/III matching
+
   frequency:    MonitorFrequency;
   channels:     { inApp: boolean; email: boolean };
   emailAddress?: string;
@@ -86,6 +93,10 @@ const tariffMonitorSchema = new Schema<ITariffMonitor>(
     destination:    { type: String, default: 'USA' },
     countries:      { type: [String], default: [] },
     sourceSearchId: { type: String },
+
+    productStatus:  { type: String },
+    itemType:       { type: String },
+    companyName:    { type: String },
 
     frequency:    { type: String, enum: ['daily', 'weekly'], default: 'daily' },
     channels:     {
