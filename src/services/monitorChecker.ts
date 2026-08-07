@@ -31,6 +31,10 @@ interface BaselineApiEntry {
   applicable_rule_ids: string[];
   rule_signature: string;
   effective_rate_estimate: number | null;
+  /** Bumped by deep-research when the meaning of the fields above changes. */
+  baseline_version?: number;
+  /** Rate includes a specific or compound line reduced against a nominal value. */
+  ad_valorem_equivalent?: boolean;
 }
 
 export interface MonitorCheckResult {
@@ -198,7 +202,22 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
           previousValue: prev.baseMfnRate ?? null, newValue: newBase, source: 'baseline',
         });
       }
-      if ((prev.ruleSignature ?? '') !== (e.rule_signature ?? '')) {
+      // Signatures are only comparable within one baseline contract version.
+      // When deep-research changes what goes into the hash, every monitored line's
+      // signature moves at once; diffing across that boundary would raise a rule
+      // change on all of them and force a full AI re-analysis of the entire
+      // monitor population in a single pass. Re-baseline silently instead — the
+      // rate comparison below still runs, so a genuine tariff move is not missed.
+      const prevVersion  = prev.baselineVersion ?? 1;
+      const freshVersion = e.baseline_version ?? 1;
+      const sameContract = prevVersion === freshVersion;
+
+      if (!sameContract) {
+        console.log(
+          `[monitor ${monitorId}] baseline contract v${prevVersion} → v${freshVersion} ` +
+          `for ${e.country}; re-baselining signature without raising a rule change`,
+        );
+      } else if ((prev.ruleSignature ?? '') !== (e.rule_signature ?? '')) {
         baselineDelta = true;
         changes.push({
           detectedAt: now, country: e.country, field: 'rules',
@@ -246,6 +265,9 @@ export async function checkMonitor(monitor: ITariffMonitor): Promise<MonitorChec
         ruleSignature:     fE?.rule_signature ?? prev?.ruleSignature ?? '',
         applicableRuleIds: fE?.applicable_rule_ids ?? prev?.applicableRuleIds ?? [],
         capturedAt:        now,
+        // Stored alongside the signature it belongs to, so the next run knows
+        // whether the two are comparable.
+        baselineVersion:   fE?.baseline_version ?? prev?.baselineVersion ?? 1,
       };
     });
 

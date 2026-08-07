@@ -11,6 +11,14 @@ export interface IMonitorBaselineEntry {
   ruleSignature:     string;          // hash of active rule ids + rates
   applicableRuleIds: string[];
   capturedAt:        Date;
+  /**
+   * Which deep-research baseline contract produced ruleSignature. A signature is
+   * only comparable against one from the same version: when the engine behind the
+   * baseline changes, every hash changes at once for reasons that have nothing to
+   * do with tariffs, and diffing across the boundary would report a rule change on
+   * every monitored line.
+   */
+  baselineVersion?:  number;
 }
 
 /** An observed change appended to the monitor's history. */
@@ -66,6 +74,8 @@ const baselineEntrySchema = new Schema<IMonitorBaselineEntry>(
     ruleSignature:     { type: String, default: '' },
     applicableRuleIds: { type: [String], default: [] },
     capturedAt:        { type: Date, default: Date.now },
+    // Absent on baselines captured before versioning; treated as version 1.
+    baselineVersion:   { type: Number, default: 1 },
   },
   { _id: false },
 );
